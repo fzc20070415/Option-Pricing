@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 
 ### GLOBAL VARIABLES ###
 # We set risk-free rate at 3.01%. Data obtained from treasury.gov, using Treasury 20-yr CMT
-rate = 0.0301
+RATE = 0.0301
+DAY = 365
+BEST = 1
 
 # Calculate average R_t in the given data
 def average_volatility(raw, start=1, end=0):
@@ -58,9 +60,29 @@ def get_volatility(raw, start=1, end=0):
     E_X2 = sum/count
     var = E_X2 - avg * avg
     # We times volatility of one business day with #business days
-    var = 252 * var
+    var = 260 * var
     print("Estimated volatility is " + str(var))
     return var
+
+# Calculate d1 and d2
+def get_d1_d2(sd, h, s, k):
+    # Use d2 = d1 - sqrt(vol) * sqrt(maturity)
+    d1 = (1/(sd * sqrt(h))) * (log(s/k) + (RATE + ((sd * sd)/2)) * h)
+    d2 = d1 - ( sd * sqrt(h) )
+    # print(d1, d2)
+    return d1, d2
+
+# Estimate option price using BS formula
+def bs_call_put(h, s, k, sd):
+    d1, d2 = get_d1_d2(sd, h, s, k)
+    # We ignore divident here
+    N1 = scipy.stats.norm.cdf(d1)
+    N2 = scipy.stats.norm.cdf(d2)
+    call = (N1 * s) - (N2 * k * exp(- RATE * h))
+    N_1 = 1 - N1
+    N_2 = 1 - N2
+    put = (N_2 * k * exp(- RATE * h)) - (s * N_1)
+    return call, put
 
 # Calculate estimated call option price
 def estimate_call_put(raw, vol, start=1, end=0):
@@ -86,14 +108,14 @@ def estimate_call_put(raw, vol, start=1, end=0):
         raw_trade = raw[i][3]
         raw_expire = raw[i][10]
         trade_date = datetime.strptime(raw_trade, '%m/%d/%Y')
-        trade_days = int(datetime.strftime(trade_date, '%j'))
-        trade_year = int(datetime.strftime(trade_date, '%Y'))
+        trade_days = float(datetime.strftime(trade_date, '%j')) * DAY / 365
+        trade_year = float(datetime.strftime(trade_date, '%Y'))
         expire_date = datetime.strptime(raw_expire, '%m/%d/%Y')
-        expire_days = int(datetime.strftime(expire_date, '%j'))
-        expire_year = int(datetime.strftime(expire_date, '%Y'))
-        expire_days = expire_days + 365 * (expire_year - trade_year)
+        expire_days = float(datetime.strftime(expire_date, '%j')) * DAY / 365
+        expire_year = float(datetime.strftime(expire_date, '%Y'))
+        expire_days = expire_days + (expire_year - trade_year) * DAY
         day_difference = expire_days - trade_days
-        year_difference = day_difference/365
+        year_difference = day_difference / DAY
         # print("Maturity is " + str(year_difference))
 
         # Get Initial Stock price
@@ -104,18 +126,8 @@ def estimate_call_put(raw, vol, start=1, end=0):
         K = float(raw[i][11])
         # print("Strike price is " + str(K))
 
-        d1 = (1/(sd * sqrt(year_difference))) * (log(S/K) + (rate + (vol/2)) * year_difference)
-        # Use d2 = d1 - sqrt(vol) * sqrt(maturity)
-        d2 = d1 - ( sd * sqrt(year_difference) )
-        # print(d1, d2)
-
-        # We ignore divident here
-        N1 = scipy.stats.norm.cdf(d1)
-        N2 = scipy.stats.norm.cdf(d2)
-        call = (N1 * S) - (N2 * K * exp(rate * year_difference))
-        N_1 = 1 - N1
-        N_2 = 1 - N2
-        put = (N_2 * K * exp(rate * year_difference)) - (S * N_1)
+        # Get call, put option premium
+        call, put = bs_call_put(year_difference, S, K, sd)
         output.append([call, put])
         # print((call, put))
         # if i == 10:
@@ -166,7 +178,10 @@ def check_estimation(est, raw, start=1, end=0):
     avg_perc_diff = sum(perc_table)/num
     print("Average absolute error is " + str(avg_abs_diff))
     print("Average percentage error is " + str(avg_perc_diff))
-
+    global BEST
+    if BEST > avg_perc_diff:
+        BEST = avg_perc_diff
+    print("Best result: " + str(BEST))
     # Plot histograms
     # TODO
 
@@ -179,6 +194,105 @@ def check_estimation(est, raw, start=1, end=0):
 
     return avg_abs_diff, avg_perc_diff
 
+def create_iv_csv(raw):
+    output = [0]
+    r = len(raw)
+    for i in range(1, r):
+        # Option type
+        opt_t = raw[i][12]
+        oc = 1
+        if (opt_t != 'C'):
+            # continue
+            oc = 0
+        # Set up constants
+        # Option price
+        opt_p = float(raw[i][5])
+        # Strike price
+        k = float(raw[i][11])
+        # Initial stock price
+        s = float(raw[i][26])
+        # Period
+        raw_trade = raw[i][3]
+        raw_expire = raw[i][10]
+        trade_date = datetime.strptime(raw_trade, '%m/%d/%Y')
+        trade_days = float(datetime.strftime(trade_date, '%j')) * DAY / 365
+        trade_year = float(datetime.strftime(trade_date, '%Y'))
+        expire_date = datetime.strptime(raw_expire, '%m/%d/%Y')
+        expire_days = float(datetime.strftime(expire_date, '%j')) * DAY / 365
+        expire_year = float(datetime.strftime(expire_date, '%Y'))
+        expire_days = expire_days + (expire_year - trade_year) * DAY
+        day_difference = expire_days - trade_days
+        h = day_difference / DAY        # Length of maturity
+
+        # Set up BS to obtain N(d1) and N(d2)
+        # Fact1: N(d1) and N(d2) takes value from 0 to 1
+        # Fact2: N(d1) > N(d2)
+        # Thus, I will initialize N(d1) as 1 and lessen it accordingly to see what's the pattern
+        Nd1_ori = 1
+        if not oc:
+            Md1_ori = 0
+        # Then, I will set a decreasing interval to find the volatility we are looking for
+        Nd1 = Nd1_ori
+        gap = 0.1
+        print("i_sd, d1-i_d1, d2-i_d2")
+        count = 0
+        # Call
+        while oc:
+            if Nd1 < 0 or Md1 > 1:
+                print("\n\nerror\n\n")
+                output.append(-1)
+                exit(1)
+                # break
+            # Compute N(d2)
+            # print("Nd1 is " + str(Nd1))
+            Nd2 = (Nd1 * s - opt_p) / (k * exp(- RATE * h))
+            # Derive d1 and d2 using inverse Norm
+            d1 = scipy.stats.norm.ppf(Nd1)
+            d2 = scipy.stats.norm.ppf(Nd2)
+            # Obtain implied standard deviation sinze d1 - d2 = sd * sqrt(maturity period)
+            i_sd = (d1 - d2) / sqrt(h)
+            # Check feasibility of d1 and d2 by recalculating d1 d2 using isd
+            i_d1, i_d2 = get_d1_d2(i_sd, h, s, k)
+            # Analyse result, adjust gap if necessary (i.e. when the absolute difference become larger)
+            # print(i_sd, d1 - i_d1, d2 - i_d2)
+            if d1 - i_d1 < 0:
+                # print("\n\ngap enlarged\n\n")
+                Nd1 = Nd1 + gap
+                gap = gap * 0.1
+                count = count + 1
+            if count == 16:
+                output.append(i_sd)
+                break
+            Nd1 = Nd1 - gap
+        # Put TODO
+        while not oc:
+            # print("This is a put option")
+            if Nd1 < 0 or Md1 > 1:
+                print("\n\nerror\n\n")
+                output.append(-1)
+                exit(1)
+                # break
+            # Compute N(d2)
+            # print("Nd1 is " + str(Nd1))
+            Nd2 = (Nd1 * s - opt_p) / (k * exp(- RATE * h))
+            # Derive d1 and d2 using inverse Norm
+            d1 = scipy.stats.norm.ppf(Nd1)
+            d2 = scipy.stats.norm.ppf(Nd2)
+            # Obtain implied standard deviation sinze d1 - d2 = sd * sqrt(maturity period)
+            i_sd = (d1 - d2) / sqrt(h)
+            # Check feasibility of d1 and d2 by recalculating d1 d2 using isd
+            i_d1, i_d2 = get_d1_d2(i_sd, h, s, k)
+            # Analyse result, adjust gap if necessary (i.e. when the absolute difference become larger)
+            # print(i_sd, d1 - i_d1, d2 - i_d2)
+            if d1 - i_d1 < 0:
+                # print("\n\ngap enlarged\n\n")
+                Nd1 = Nd1 - gap
+                gap = gap * 0.1
+                count = count + 1
+            if count == 16:
+                output.append(i_sd)
+                break
+            Nd1 = Nd1 + gap
 
 def main():
     # data = load_data("AAPL_032018.csv", header=1, predict_col=0)
@@ -211,43 +325,77 @@ def main():
     # # Evaluation
     # check_estimation(call_put_table, raw_data)
 
-    # Use different volatility to estimate call & put
-    len_hp = len(raw_hp)
-
     report = [['First Period', 'last Period', 'Risk Free Rate', 'Estimated Volatility', 'Avg Abs Err', 'Avg Perc Err']]
+
+    ### Task 1: HV ###
+    # Test with different volatility and different risk free rate to obtain the least error.
     if 1:
-        for r in range(0, 500, 5):
-            global rate
+        len_hp = len(raw_hp)
+        rate = RATE
+        for r in range(0, 500, 50):
+            global RATE
             print(r)
-            rate = rate - r*0.00001
+            RATE = rate - r*0.00001
             for i in range(1, len_hp, 20):
-                for j in range(0, len_hp, 20):
+                for j in range(0, len_hp, 100):
                     k = len_hp - j - 1
+                    k = 2045   # fix to the last day
                     if k <= i:
                         break
                     if k <2045:
                         break
                     # print(i, k)
                     # Estimate volatility using data from i to k
-                    print("Using rate = " + str(rate))
+                    print("Using rate = " + str(RATE))
                     print("Using data from " + raw_hp[i][0] + " to " + raw_hp[k][0])
                     volatility = get_volatility(raw_hp, start=i, end=k)
                     call_put_table = estimate_call_put(raw_data, volatility)
 
                     avg_abs_err, avg_perc_err = check_estimation(call_put_table, raw_data)
-                    report.append([raw_hp[i][0], raw_hp[k][0], rate, volatility, avg_abs_err, avg_perc_err])
-
+                    report.append([raw_hp[i][0], raw_hp[k][0], RATE, volatility, avg_abs_err, avg_perc_err])
+                    break   # Temporary Test
+    else:
+        print("HV skipped")
 
     # start=800, end=2200 gives best estimation for volatility for original risk free rate
 
 
+    ### Task 2: IV ###
+
+    ### Structure:
+        # Use Option price to calculate implied volatility
+        # Interpolate a "Smile Curve" using implied volatility and strike price (X: K; Y: sigma)
+            # Parabola: y=a(x-b)^2+c
+            # How many points to use? Overfitting?
+            # ML method?
+
+    # Preparation before computation
+    # Generate data for implied volatility
+    if 0:
+        create_iv_csv(raw_data)
+        print("IV csv created")
+    else:
+        print("IV Preparation skipped")
+
+
+    if 0:
+
+        pass
+    else:
+        print("IV skipped")
+
+
+
+
 
     # write into csv
-    with open("../report/report.csv", 'w') as book:
-        wr = csv.writer(book, dialect='excel')
-        for row in report:
-            wr.writerow(row,)
-
+    if 1:
+        with open("../report/report.csv", 'w') as book:
+            wr = csv.writer(book, dialect='excel')
+            for row in report:
+                wr.writerow(row,)
+    else:
+        print("Not writing into csv")
 
 
     print("Task done. Exiting main function.")
