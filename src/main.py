@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 ### GLOBAL VARIABLES ###
 # We set risk-free rate at 3.01%. Data obtained from treasury.gov, using Treasury 20-yr CMT
-RATE = 0.0301
+RATE = 0.0256
 DAY = 365
 BEST = 1
 
@@ -64,10 +64,22 @@ def get_volatility(raw, start=1, end=0):
     print("Estimated volatility is " + str(var))
     return var
 
+def get_maturity(raw_trade, raw_expire):
+    trade_date = datetime.strptime(raw_trade, '%m/%d/%Y')
+    trade_days = float(datetime.strftime(trade_date, '%j')) * DAY / 365
+    trade_year = float(datetime.strftime(trade_date, '%Y'))
+    expire_date = datetime.strptime(raw_expire, '%m/%d/%Y')
+    expire_days = float(datetime.strftime(expire_date, '%j')) * DAY / 365
+    expire_year = float(datetime.strftime(expire_date, '%Y'))
+    expire_days = expire_days + (expire_year - trade_year) * DAY
+    day_difference = expire_days - trade_days
+    h = day_difference / DAY        # Length of maturity
+    return h
+
 # Calculate d1 and d2
 def get_d1_d2(sd, h, s, k):
+    d1 = (1/(sd * sqrt(h))) * ((log(s/k)) + (RATE + ((sd * sd)/2)) * h)
     # Use d2 = d1 - sqrt(vol) * sqrt(maturity)
-    d1 = (1/(sd * sqrt(h))) * (log(s/k) + (RATE + ((sd * sd)/2)) * h)
     d2 = d1 - ( sd * sqrt(h) )
     # print(d1, d2)
     return d1, d2
@@ -107,15 +119,7 @@ def estimate_call_put(raw, vol, start=1, end=0):
             break
         raw_trade = raw[i][3]
         raw_expire = raw[i][10]
-        trade_date = datetime.strptime(raw_trade, '%m/%d/%Y')
-        trade_days = float(datetime.strftime(trade_date, '%j')) * DAY / 365
-        trade_year = float(datetime.strftime(trade_date, '%Y'))
-        expire_date = datetime.strptime(raw_expire, '%m/%d/%Y')
-        expire_days = float(datetime.strftime(expire_date, '%j')) * DAY / 365
-        expire_year = float(datetime.strftime(expire_date, '%Y'))
-        expire_days = expire_days + (expire_year - trade_year) * DAY
-        day_difference = expire_days - trade_days
-        year_difference = day_difference / DAY
+        year_difference = get_maturity(raw_trade, raw_expire)
         # print("Maturity is " + str(year_difference))
 
         # Get Initial Stock price
@@ -194,16 +198,17 @@ def check_estimation(est, raw, start=1, end=0):
 
     return avg_abs_diff, avg_perc_diff
 
+# Returns a table of implied volatility
 def create_iv_csv(raw):
-    output = [0]
+    output = [[0]]
     r = len(raw)
     for i in range(1, r):
+        i = 109 #TEST
+        # print("i = " + str(i))
         # Option type
         opt_t = raw[i][12]
         oc = 1
-        if (opt_t != 'C'):
-            # continue
-            oc = 0
+
         # Set up constants
         # Option price
         opt_p = float(raw[i][5])
@@ -214,85 +219,131 @@ def create_iv_csv(raw):
         # Period
         raw_trade = raw[i][3]
         raw_expire = raw[i][10]
-        trade_date = datetime.strptime(raw_trade, '%m/%d/%Y')
-        trade_days = float(datetime.strftime(trade_date, '%j')) * DAY / 365
-        trade_year = float(datetime.strftime(trade_date, '%Y'))
-        expire_date = datetime.strptime(raw_expire, '%m/%d/%Y')
-        expire_days = float(datetime.strftime(expire_date, '%j')) * DAY / 365
-        expire_year = float(datetime.strftime(expire_date, '%Y'))
-        expire_days = expire_days + (expire_year - trade_year) * DAY
-        day_difference = expire_days - trade_days
-        h = day_difference / DAY        # Length of maturity
+        h = get_maturity(raw_trade, raw_expire)
 
-        # Set up BS to obtain N(d1) and N(d2)
-        # Fact1: N(d1) and N(d2) takes value from 0 to 1
-        # Fact2: N(d1) > N(d2)
-        # Thus, I will initialize N(d1) as 1 and lessen it accordingly to see what's the pattern
-        Nd1_ori = 1
-        if not oc:
-            Md1_ori = 0
-        # Then, I will set a decreasing interval to find the volatility we are looking for
-        Nd1 = Nd1_ori
+        # # Set up BS to obtain N(d1) and N(d2)
+        # # Fact1: N(d1) and N(d2) takes value from 0 to 1
+        # # Fact2: N(d1) > N(d2)
+        # # Thus, I will initialize N(d1) as 1 and lessen it accordingly to see what's the pattern
+        # Nd1 = 0.92
+        if (opt_t == 'P'):
+            # continue
+            oc = 0
+        #     Nd1 = 0.08
+        # # Then, I will set a decreasing interval to find the volatility we are looking for
+        # gap = 0.1
+        # Nd1 = 0.9974349652396559#TEST
+        # # gap = 0.001#TEST
+        # # print("i_sd, d1-i_d1, d2-i_d2")
+        # count = 0
+        # # Call
+        # while oc:
+        #     print("Nd1 is " + str(Nd1))
+        #     # print(h, s, k)
+        #     if Nd1 < 0:
+        #         print("\n\nerror\n\n")
+        #         exit(1)#TEST
+        #         Nd1 = Nd1 + gap * 2
+        #         gap = gap * 0.1
+        #         count = count + 1
+        #         print("Gap is now " + str(gap) + "Nd1 is now " + str(Nd1))
+        #     if Nd1 >= 1:
+        #         Nd1 = 0.9999999999999
+        #         gap = 0.001
+        #         count = 3
+        #
+        #     # Compute N(d2)
+        #     Nd2 = (Nd1 * s - opt_p) / (k * exp(- RATE * h))
+        #     # Derive d1 and d2 using inverse Norm
+        #     d1 = scipy.stats.norm.ppf(Nd1)
+        #     d2 = scipy.stats.norm.ppf(Nd2)
+        #     print(d1, d2)
+        #     # Obtain implied standard deviation sinze d1 - d2 = sd * sqrt(maturity period)
+        #     i_sd = (d1 - d2) / sqrt(h)
+        #     # Check feasibility of d1 and d2 by recalculating d1 d2 using isd
+        #     i_d1, i_d2 = get_d1_d2(i_sd, h, s, k)
+        #     # Analyse result, adjust gap if necessary (i.e. when the absolute difference become larger)
+        #     print(i_sd, d1 - i_d1, d2 - i_d2)
+        #     if d1 - i_d1 < 0 or isnan(i_d1):
+        #         print("\n\ngap changed\n\n")
+        #         Nd1 = Nd1 + gap
+        #         gap = gap * 0.1
+        #         count = count + 1
+        #         print("Gap is now " + str(gap))
+        #     if count >= 16:
+        #         output.append([i_sd])
+        #         print(i_sd)
+        #         exit(1)#TEST
+        #         break
+        #     Nd1 = Nd1 - gap
+        #     exit(1)#TEST
+        # # Put
+        # while not oc:
+        #     # print("This is a put option")
+        #     if Nd1 > 1:
+        #         # print("\n\nerror\n\n")
+        #         Nd1 = Nd1 - gap * 2
+        #         gap = gap * 0.1
+        #         count = count + 1
+        #         # break
+        #     if Nd1 <= 0:
+        #         Nd1 = 0.000001
+        #         gap = 0.001
+        #         count = 3
+        #     # else:
+        #     # Compute N(d2)
+        #     # print("Nd1 is " + str(Nd1))
+        #     Nd2 = (Nd1 * s + opt_p) / (k * exp(- RATE * h))
+        #     # Derive d1 and d2 using inverse Norm
+        #     d1 = - scipy.stats.norm.ppf(Nd1)
+        #     d2 = - scipy.stats.norm.ppf(Nd2)
+        #     # print(d1,d2)
+        #     # Obtain implied standard deviation sinze d1 - d2 = sd * sqrt(maturity period)
+        #     i_sd = (d1 - d2) / sqrt(h)
+        #     # Check feasibility of d1 and d2 by recalculating d1 d2 using isd
+        #     i_d1, i_d2 = get_d1_d2(i_sd, h, s, k)
+        #     # Analyse result, adjust gap if necessary (i.e. when the absolute difference become larger)
+        #     # print(i_sd, d1 - i_d1, d2 - i_d2)
+        #     if d1 - i_d1 < 0 or isnan(i_d1):
+        #         # print("\n\ngap enlarged, " + str(count) + "\n\n")
+        #         Nd1 = Nd1 - gap
+        #         gap = gap * 0.1
+        #         count = count + 1
+        #     if count == 16:
+        #         output.append([i_sd])
+        #         # exit(1)#TEST
+        #         print(i_sd)
+        #         break
+        #     Nd1 = Nd1 + gap
+
+
+        # Estimate volatility using brute force
+        i_sd = 0.01
         gap = 0.1
-        print("i_sd, d1-i_d1, d2-i_d2")
-        count = 0
-        # Call
-        while oc:
-            if Nd1 < 0 or Md1 > 1:
-                print("\n\nerror\n\n")
-                output.append(-1)
+        count = 1
+        gap = 0.01#test
+        while 1:
+            i_c, i_p = bs_call_put(h, s, k, i_sd)
+            print(i_c, i_p, opt_p, opt_t, i_sd)
+            # if oc:
+            #     if i_c > opt_p:
+            #         i_sd = i_sd - gap
+            #         gap = gap * 0.1
+            #         count = count + 1
+            # else:
+            #     if i_p > opt_p:
+            #         i_sd = i_sd - gap
+            #         gap = gap * 0.1
+            #         count = count + 1
+            if i_sd > 1:
                 exit(1)
-                # break
-            # Compute N(d2)
-            # print("Nd1 is " + str(Nd1))
-            Nd2 = (Nd1 * s - opt_p) / (k * exp(- RATE * h))
-            # Derive d1 and d2 using inverse Norm
-            d1 = scipy.stats.norm.ppf(Nd1)
-            d2 = scipy.stats.norm.ppf(Nd2)
-            # Obtain implied standard deviation sinze d1 - d2 = sd * sqrt(maturity period)
-            i_sd = (d1 - d2) / sqrt(h)
-            # Check feasibility of d1 and d2 by recalculating d1 d2 using isd
-            i_d1, i_d2 = get_d1_d2(i_sd, h, s, k)
-            # Analyse result, adjust gap if necessary (i.e. when the absolute difference become larger)
-            # print(i_sd, d1 - i_d1, d2 - i_d2)
-            if d1 - i_d1 < 0:
-                # print("\n\ngap enlarged\n\n")
-                Nd1 = Nd1 + gap
-                gap = gap * 0.1
-                count = count + 1
             if count == 16:
-                output.append(i_sd)
+                print(i_sd)
+                exit(1)#TEST
+                output.append([i_sd])
                 break
-            Nd1 = Nd1 - gap
-        # Put TODO
-        while not oc:
-            # print("This is a put option")
-            if Nd1 < 0 or Md1 > 1:
-                print("\n\nerror\n\n")
-                output.append(-1)
-                exit(1)
-                # break
-            # Compute N(d2)
-            # print("Nd1 is " + str(Nd1))
-            Nd2 = (Nd1 * s - opt_p) / (k * exp(- RATE * h))
-            # Derive d1 and d2 using inverse Norm
-            d1 = scipy.stats.norm.ppf(Nd1)
-            d2 = scipy.stats.norm.ppf(Nd2)
-            # Obtain implied standard deviation sinze d1 - d2 = sd * sqrt(maturity period)
-            i_sd = (d1 - d2) / sqrt(h)
-            # Check feasibility of d1 and d2 by recalculating d1 d2 using isd
-            i_d1, i_d2 = get_d1_d2(i_sd, h, s, k)
-            # Analyse result, adjust gap if necessary (i.e. when the absolute difference become larger)
-            # print(i_sd, d1 - i_d1, d2 - i_d2)
-            if d1 - i_d1 < 0:
-                # print("\n\ngap enlarged\n\n")
-                Nd1 = Nd1 - gap
-                gap = gap * 0.1
-                count = count + 1
-            if count == 16:
-                output.append(i_sd)
-                break
-            Nd1 = Nd1 + gap
+            i_sd = i_sd + gap
+    return output
 
 def main():
     # data = load_data("AAPL_032018.csv", header=1, predict_col=0)
@@ -312,6 +363,15 @@ def main():
         data_reader = csv.reader(data)
         raw_hp = list(data_reader)
 
+    # Load Prepared Implied Volatility csv {ivlist[i][0]}
+    if 1:
+        with open("../data/IV.csv") as data:
+            data_reader = csv.reader(data)
+            iv_list = list(data_reader)
+            print(iv_list)
+    else:
+        print("IV csv skipped")
+
     # # Test printing
     # for i in range (2):
     #     print(raw_data[i])
@@ -329,11 +389,11 @@ def main():
 
     ### Task 1: HV ###
     # Test with different volatility and different risk free rate to obtain the least error.
-    if 1:
+    if 0:
         len_hp = len(raw_hp)
+        global RATE
         rate = RATE
         for r in range(0, 500, 50):
-            global RATE
             print(r)
             RATE = rate - r*0.00001
             for i in range(1, len_hp, 20):
@@ -372,17 +432,17 @@ def main():
     # Preparation before computation
     # Generate data for implied volatility
     if 0:
-        create_iv_csv(raw_data)
+        report = create_iv_csv(raw_data)
         print("IV csv created")
     else:
         print("IV Preparation skipped")
 
-
-    if 0:
+    # Estimate option premium from IV
+    if 1:
 
         pass
     else:
-        print("IV skipped")
+        print("IV estimation skipped")
 
 
 
@@ -391,9 +451,10 @@ def main():
     # write into csv
     if 1:
         with open("../report/report.csv", 'w') as book:
-            wr = csv.writer(book, dialect='excel')
+            wr = csv.writer(book, delimiter=',', lineterminator='\n')
             for row in report:
-                wr.writerow(row,)
+                wr.writerow(row, )
+                #####NOTICE: How to write digits into crv?????
     else:
         print("Not writing into csv")
 
