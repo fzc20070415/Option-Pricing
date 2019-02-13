@@ -4,6 +4,8 @@ from math import *
 import csv
 from datetime import datetime
 import matplotlib.pyplot as plt
+import sys
+# import time
 
 
 ### GLOBAL VARIABLES ###
@@ -203,7 +205,7 @@ def create_iv_csv(raw):
     output = [[0]]
     r = len(raw)
     for i in range(1, r):
-        i = 109 #TEST
+        # i = 109 #TEST
         # print("i = " + str(i))
         # Option type
         opt_t = raw[i][12]
@@ -321,29 +323,194 @@ def create_iv_csv(raw):
         i_sd = 0.01
         gap = 0.1
         count = 1
-        gap = 0.01#test
+        # gap = 0.01#test
         while 1:
             i_c, i_p = bs_call_put(h, s, k, i_sd)
-            print(i_c, i_p, opt_p, opt_t, i_sd)
-            # if oc:
-            #     if i_c > opt_p:
-            #         i_sd = i_sd - gap
-            #         gap = gap * 0.1
-            #         count = count + 1
-            # else:
-            #     if i_p > opt_p:
-            #         i_sd = i_sd - gap
-            #         gap = gap * 0.1
-            #         count = count + 1
-            if i_sd > 1:
-                exit(1)
+            # print(i_c, i_p, opt_p, opt_t, i_sd)
+            if oc:
+                if i_c > opt_p:
+                    i_sd = i_sd - gap
+                    gap = gap * 0.1
+                    count = count + 1
+            else:
+                if i_p > opt_p:
+                    i_sd = i_sd - gap
+                    gap = gap * 0.1
+                    count = count + 1
+            # if i_sd > 1:#TEST
+            #     exit(1)#TEST
             if count == 16:
-                print(i_sd)
-                exit(1)#TEST
+                # print(i_sd)
+                # exit(1)#TEST
                 output.append([i_sd])
                 break
             i_sd = i_sd + gap
     return output
+
+# Add hour indicator for report
+def pre_process_time(report, raw):
+    ### Parameters:
+        # report - iv table
+        # raw - raw_data
+
+    # Trade time = raw[i][27]
+    output = [[0,0,0,0]]
+    s = len(raw)
+    for i in range(1, s):
+        hhmmss = raw[i][27]
+        # print(hhmmss)
+        (hr, min, sec) = hhmmss.split(':')
+        # print(hr, min, sec)
+        output.append([float(report[i][0]), int(hr), int(min), float(sec)])
+        # print(output[i])
+    return output
+
+def convert_input(time, k):
+    # Validate input
+    try:
+        k = float(k)
+        # print("k is ", k)
+    except:
+        print ("Error:", sys.exc_info()[0])
+        k = -1
+    try:
+        tm = datetime.strptime(time,'%H:%M')
+        hr = int(datetime.strftime(tm, '%H'))
+        min = int(datetime.strftime(tm, '%M'))
+        # print(hr,min)
+    except:
+        print ("Error:", sys.exc_info()[0])
+        hr = -1
+        min = -1
+    return hr, min, k
+
+def build_temp_database(raw, iv, hh, mm):
+    # Handle overflow
+    if mm == -1:
+        mm = 59
+        hh = hh - 1
+    # Extract useful data based on input to build a temporary database
+    database = []
+    # Format of database:
+        # 0. Option Trade Price
+        # 1. Option Maturity/Period (Expiration Date - Trade Date)
+        # 2. Strike Price
+        # 3. Call or Put
+        # 4. Price of Underlying Asset
+        # 5. Implied Volatility (Standard Deviation)
+        # 6. Minute
+        # 7. Second
+    size = len(iv)
+    for i in range(1, size):
+        if int(iv[i][1]) >= hh:
+            if int(iv[i][1]) == hh:
+                if int(iv[i][2]) >= mm:
+                    if int(iv[i][2]) == mm:
+                        print("Time", hh, mm)
+                        database.append([float(raw[i][5]),                      # Option Trade Price
+                                         get_maturity(raw[i][3], raw[i][10]),   # Maturity
+                                         float(raw[i][11]),                     # Strike Price
+                                         raw[i][12],                            # Put or Call
+                                         float(raw[i][26]),                     # Stock Price
+                                         float(iv[i][0]),                       # Implied Volatility (sd)
+                                         float(iv[i][2]),                       # Minute
+                                         float(iv[i][3])                        # Second
+                                        ])
+                    else:
+                        break
+            else:
+                break
+    # print(database, len(database))
+    return database
+
+def draw_smile_curve(database):
+    size = len(database)
+    if size == 0:
+        print("Empty input database, Smile curve can't be drawn.")
+        return -1
+    x = numpy.zeros(size)
+    y = numpy.zeros(size)
+    a = [0, 0.2]
+    b = []
+    for i in a:
+        b.append(database[0][4])
+    for i in range(size):
+        y[i] = pow(database[i][5], 2)
+        # y[i] = database[i][5]
+        x[i] = database[i][2]
+    plt.scatter(x, y, s=10)
+    plt.plot(b, a)
+    plt.xlabel('Strike Price (K)')
+    plt.ylabel('Implied Volatility (σ^2)')
+    plt.show()
+    # time.sleep(20)
+
+def iv_estimation(raw, iv):
+    # Read input
+    time = input("Input time for evaluation in 12-h format [hh:mm]: ")
+    if time == "exit":
+        return 0
+    k = input("Input the strike price to estimate option price: ")
+    if k == "exit":
+        return 0
+
+    # Convert input and validate
+    hh, mm, kk = convert_input(time, k)
+    if hh == -1 and kk == -1:
+        print("Invalid time and K!")
+    elif hh == -1:
+        print("Invalid time!")
+        return -1
+    elif kk < 0:
+        print("Invalid K!")
+        return -1
+    else:
+        # Date format verified.
+        if hh < 9:
+            hh = hh + 12
+        if hh >= 16 or (hh == 9 and mm < 30):
+            print("Invalid Trading Hour requested")
+            return -1
+        elif hh == 9 and mm == 30:
+            print("We cannot estimate option price at 9:30 due to lack of prior data.")
+            return -1
+        print("Estimating option price at K =", kk, "at", hh, ":", mm, "--")
+
+    # Construct database
+    database1 = build_temp_database(raw, iv, hh, mm)
+    database2 = build_temp_database(raw, iv, hh, mm-1)
+
+    # Choose data which has similar underlying asset spot price
+    database3 = []
+    current_price = database1[0][4]
+    if 1:
+        threshold = 0
+        for row in database2:
+            if row[4] == current_price and row[5] > 0:
+                database3.append(row)
+                print(row)
+        while len(database3) < 5:
+            prv_threshold = threshold
+            threshold = 1
+            for row in database2:
+                temp = abs(row[4] - current_price)
+                if temp < threshold and temp > prv_threshold:
+                    threshold = temp
+            for row in database2:
+                temp = abs(row[4] - current_price)
+                if temp <= threshold and temp > prv_threshold and row[5] > 0:
+                    database3.append(row)
+                    print(row)
+    # print(database2, len(database1))
+
+    # Draw Smile Curve (X - K , Y - iv = sd^2)
+    size = len(database2)
+    # draw_smile_curve(database2[size-10:])
+    # draw_smile_curve(database2[size-20:])
+    # draw_smile_curve(database2[size-30:])
+    draw_smile_curve(database3)
+    draw_smile_curve(database2)
+
 
 def main():
     # data = load_data("AAPL_032018.csv", header=1, predict_col=0)
@@ -365,10 +532,11 @@ def main():
 
     # Load Prepared Implied Volatility csv {ivlist[i][0]}
     if 1:
+        print("IV csv loaded")
         with open("../data/IV.csv") as data:
             data_reader = csv.reader(data)
             iv_list = list(data_reader)
-            print(iv_list)
+            # print(iv_list[1][0], iv_list[1][1], iv_list[1][2], iv_list[1][3])
     else:
         print("IV csv skipped")
 
@@ -402,7 +570,7 @@ def main():
                     k = 2045   # fix to the last day
                     if k <= i:
                         break
-                    if k <2045:
+                    if k < 2045:
                         break
                     # print(i, k)
                     # Estimate volatility using data from i to k
@@ -432,34 +600,42 @@ def main():
     # Preparation before computation
     # Generate data for implied volatility
     if 0:
-        report = create_iv_csv(raw_data)
+        # raw_report = create_iv_csv(raw_data)
+        raw_report = iv_list
+        report = pre_process_time(raw_report, raw_data)
         print("IV csv created")
+
     else:
         print("IV Preparation skipped")
 
+    # Formate of iv_table:
+        # iv_table[i][iv, hr, min, sec]
+        # iv  = ivtable[i][0]
+        # hr  = ivtable[i][1]
+        # min = ivtable[i][2]
+        # sec = ivtable[i][3]
+
     # Estimate option premium from IV
     if 1:
-
-        pass
+        while 1:
+            print(" --- Start estimating option premium from implied volatility --- ")
+            if (iv_estimation(raw_data, iv_list) == 0):
+                break
     else:
         print("IV estimation skipped")
 
 
-
-
-
     # write into csv
-    if 1:
+    if 0:
         with open("../report/report.csv", 'w') as book:
             wr = csv.writer(book, delimiter=',', lineterminator='\n')
             for row in report:
                 wr.writerow(row, )
-                #####NOTICE: How to write digits into crv?????
     else:
         print("Not writing into csv")
 
 
-    print("Task done. Exiting main function.")
+    print("Task done. Exiting main function...")
 
 if __name__ == "__main__":
     main()
