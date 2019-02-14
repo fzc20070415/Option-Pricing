@@ -1,10 +1,11 @@
-import numpy
+import numpy as np
 import scipy.stats
 from math import *
 import csv
 from datetime import datetime
 import matplotlib.pyplot as plt
 import sys
+from scipy.optimize import curve_fit
 # import time
 
 
@@ -13,6 +14,7 @@ import sys
 RATE = 0.0256
 DAY = 365
 BEST = 1
+DATE = '0-0-0'
 
 # Calculate average R_t in the given data
 def average_volatility(raw, start=1, end=0):
@@ -67,6 +69,7 @@ def get_volatility(raw, start=1, end=0):
     return var
 
 def get_maturity(raw_trade, raw_expire):
+    # print("GET_MATURITY CALLED", raw_trade, raw_expire)
     trade_date = datetime.strptime(raw_trade, '%m/%d/%Y')
     trade_days = float(datetime.strftime(trade_date, '%j')) * DAY / 365
     trade_year = float(datetime.strftime(trade_date, '%Y'))
@@ -365,13 +368,13 @@ def pre_process_time(report, raw):
         # print(output[i])
     return output
 
-def convert_input(time, k):
+def convert_input(time='-1', k='-1', p='-1'):
     # Validate input
     try:
         k = float(k)
         # print("k is ", k)
     except:
-        print ("Error:", sys.exc_info()[0])
+        # print ("Error (Strike Price):", sys.exc_info()[0])
         k = -1
     try:
         tm = datetime.strptime(time,'%H:%M')
@@ -379,21 +382,27 @@ def convert_input(time, k):
         min = int(datetime.strftime(tm, '%M'))
         # print(hr,min)
     except:
-        print ("Error:", sys.exc_info()[0])
+        # print ("Error (Time):", sys.exc_info()[0])
         hr = -1
         min = -1
-    return hr, min, k
+    try:
+        p = get_maturity(DATE, p)
+    except:
+        # print ("Error (Maturity):", sys.exc_info()[0])
+        p = -1
+    return hr, min, k, p
 
 def build_temp_database(raw, iv, hh, mm):
     # Handle overflow
-    if mm == -1:
-        mm = 59
+    if mm < 0:
+        mm = 60 + mm
         hh = hh - 1
+
     # Extract useful data based on input to build a temporary database
     database = []
     # Format of database:
         # 0. Option Trade Price
-        # 1. Option Maturity/Period (Expiration Date - Trade Date)
+        # 1. Option Maturity/Period (Expiration Date - Trade Date) (in term of year)
         # 2. Strike Price
         # 3. Call or Put
         # 4. Price of Underlying Asset
@@ -406,7 +415,7 @@ def build_temp_database(raw, iv, hh, mm):
             if int(iv[i][1]) == hh:
                 if int(iv[i][2]) >= mm:
                     if int(iv[i][2]) == mm:
-                        print("Time", hh, mm)
+                        # print("Time", hh, mm)
                         database.append([float(raw[i][5]),                      # Option Trade Price
                                          get_maturity(raw[i][3], raw[i][10]),   # Maturity
                                          float(raw[i][11]),                     # Strike Price
@@ -423,13 +432,23 @@ def build_temp_database(raw, iv, hh, mm):
     # print(database, len(database))
     return database
 
-def draw_smile_curve(database):
+def func(x, a, b, c):
+    return a * (x - b) * (x - b) + c
+
+def inc_seq(min, max):
+    x = []
+    for i in range(min,max):
+        x.append(i)
+        x.append(i+0.5)
+    return x
+
+def draw_smile_curve(database, current_price, kk):
     size = len(database)
     if size == 0:
         print("Empty input database, Smile curve can't be drawn.")
         return -1
-    x = numpy.zeros(size)
-    y = numpy.zeros(size)
+    x = np.zeros(size)
+    y = np.zeros(size)
     a = [0, 0.2]
     b = []
     for i in a:
@@ -438,12 +457,30 @@ def draw_smile_curve(database):
         y[i] = pow(database[i][5], 2)
         # y[i] = database[i][5]
         x[i] = database[i][2]
+
+    # Show distribution of data points
     plt.scatter(x, y, s=10)
     plt.plot(b, a)
     plt.xlabel('Strike Price (K)')
     plt.ylabel('Implied Volatility (σ^2)')
-    plt.show()
+    # plt.show()
     # time.sleep(20)
+
+    # Use relevant data points to fit a curve
+    x_std = inc_seq(int(current_price * 0.5), int(current_price * 1.5))
+    # popt = estimated [a, b, c]
+    popt1, pcov1 = curve_fit(func, x, y, bounds=([-np.inf, current_price - 0.02, -np.inf], [np.inf, current_price + 0.02, np.inf]))
+    popt2, pcov2 = curve_fit(func, x, y)
+    # print(x_std)
+    plt.plot(x_std, func(x_std, *popt1), 'r--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt1))
+    plt.plot(x_std, func(x_std, *popt2), 'g--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt2))
+    plt.legend()
+    plt.show()
+
+    return popt1
+
+
+
 
 def iv_estimation(raw, iv):
     # Read input
@@ -453,16 +490,23 @@ def iv_estimation(raw, iv):
     k = input("Input the strike price to estimate option price: ")
     if k == "exit":
         return 0
+    p = input("Input the expiration date in MM/DD/YYYY: ")
+    if p == "exit":
+        return 0
 
     # Convert input and validate
-    hh, mm, kk = convert_input(time, k)
+    hh, mm, kk, pp = convert_input(time, k, p)
     if hh == -1 and kk == -1:
         print("Invalid time and K!")
+        return -1
     elif hh == -1:
         print("Invalid time!")
         return -1
     elif kk < 0:
         print("Invalid K!")
+        return -1
+    elif pp < 0:
+        print("Invalid maturity!")
         return -1
     else:
         # Date format verified.
@@ -478,39 +522,76 @@ def iv_estimation(raw, iv):
 
     # Construct database
     database1 = build_temp_database(raw, iv, hh, mm)
-    database2 = build_temp_database(raw, iv, hh, mm-1)
-
-    # Choose data which has similar underlying asset spot price
-    database3 = []
+    temp_minute = mm
+    # Choose data which has similar underlying asset spot price and similar maturity
+    database_all = []
+    database_5 = []
     current_price = database1[0][4]
+    current_maturity = pp
     if 1:
         threshold = 0
-        for row in database2:
-            if row[4] == current_price and row[5] > 0:
-                database3.append(row)
+        temp_minute = temp_minute - 1
+        while len(database_all) <= 50:
+            database2 = build_temp_database(raw, iv, hh, temp_minute)
+            for row in database2:
+                if row[4] == current_price and row[5] > 0:
+                    database_all.append(row)
+                    # print(row)
+            while threshold < 1:
+                prv_threshold = threshold
+                threshold = 1
+                for row in database2:
+                    temp = abs(row[4] - current_price)
+                    if temp < threshold and temp > prv_threshold:
+                        threshold = temp
+                for row in database2:
+                    temp = abs(row[4] - current_price)
+                    if temp <= threshold and temp > prv_threshold and row[5] > 0:
+                        database_all.append(row)
+
+        # print(database_all)
+        threshold = 0
+        for row in database_all:
+            if row[1] == current_maturity:
+                database_5.append(row)
                 print(row)
-        while len(database3) < 5:
-            prv_threshold = threshold
-            threshold = 1
-            for row in database2:
-                temp = abs(row[4] - current_price)
-                if temp < threshold and temp > prv_threshold:
-                    threshold = temp
-            for row in database2:
-                temp = abs(row[4] - current_price)
-                if temp <= threshold and temp > prv_threshold and row[5] > 0:
-                    database3.append(row)
-                    print(row)
+            # Choose up to 5 points
+            if len(database_5) >= 5:
+                break
+            while len(database_5) < 5 and threshold <= 0.5:
+                prv_threshold = threshold
+                threshold = 0.5
+                for row in database_all:
+                    temp = abs(row[1] - current_maturity)
+                    if temp < threshold and temp > prv_threshold:
+                        threshold = temp
+                for row in database_all:
+                    temp = abs(row[1] - current_maturity)
+                    if temp <= threshold and temp > prv_threshold:
+                        database_5.append(row)
     # print(database2, len(database1))
 
     # Draw Smile Curve (X - K , Y - iv = sd^2)
-    size = len(database2)
+    # size = len(database2)
     # draw_smile_curve(database2[size-10:])
     # draw_smile_curve(database2[size-20:])
     # draw_smile_curve(database2[size-30:])
-    draw_smile_curve(database3)
-    draw_smile_curve(database2)
+    popt_5 = draw_smile_curve(database_5, current_price, kk)
+    popt_all = draw_smile_curve(database_all, current_price, kk)
 
+    # Use the estimated curve to predict the volatility
+    est_vol_5 = func(kk, *popt_5)
+    est_vol_all = func(kk, *popt_all)
+    est_sd_5 = sqrt(est_vol_5)
+    est_sd_all = sqrt(est_vol_all)
+
+    # Predict option price [TODO]
+    est_call_5, est_put_5 = bs_call_put(current_maturity, current_price, kk, est_sd_5)
+    est_call_all, est_put_all = bs_call_put(current_maturity, current_price, kk, est_sd_all)
+    print("5 sample test:   The estimated Call option price =: ", est_call_5)
+    print("5 sample test:   The estimated Put option price  =: ", est_put_5)
+    print("All sample test: The estimated Call option price =: ", est_call_5)
+    print("All sample test: The estimated Put option price  =: ", est_put_5)
 
 def main():
     # data = load_data("AAPL_032018.csv", header=1, predict_col=0)
@@ -617,6 +698,13 @@ def main():
 
     # Estimate option premium from IV
     if 1:
+        global DATE
+        DATE = input("Input today's date in MM/DD/YYYY: ")
+        h,m,k,p = convert_input(p=DATE)
+        if p != 0:
+            # print(p)
+            print(DATE, "is not a valid date. Exiting")
+            exit(1)
         while 1:
             print(" --- Start estimating option premium from implied volatility --- ")
             if (iv_estimation(raw_data, iv_list) == 0):
