@@ -442,11 +442,11 @@ def inc_seq(min, max):
         x.append(i+0.5)
     return x
 
-def draw_smile_curve(database, current_price, kk):
+def draw_smile_curve(database, current_price, kk, plot=1):
     size = len(database)
     if size == 0:
         print("Empty input database, Smile curve can't be drawn.")
-        return -1
+        return -1, -1, -1
     x = np.zeros(size)
     y = np.zeros(size)
     a = [0, 0.2]
@@ -466,28 +466,149 @@ def draw_smile_curve(database, current_price, kk):
     # plt.show()
     # time.sleep(20)
 
-    # Use relevant data points to fit a curve
-    x_std = inc_seq(int(current_price * 0.5), int(current_price * 1.5))
-    # popt = estimated [a, b, c]
-    popt1, pcov1 = curve_fit(func, x, y, bounds=([-np.inf, current_price - 0.02, -np.inf], [np.inf, current_price + 0.02, np.inf]))
-    popt2, pcov2 = curve_fit(func, x, y)
+    try:
+        # Use relevant data points to fit a curve
+        x_std = inc_seq(int(current_price * 0.5), int(current_price * 1.5))
+        # popt = estimated [a, b, c]
+        popt1, pcov1 = curve_fit(func, x, y, bounds=([0, current_price - 0.02, 0], [np.inf, current_price + 0.02, np.inf]))
+        # popt2, pcov2 = curve_fit(func, x, y, bounds=([0, -np.inf, -np.inf], [np.inf, np.inf, np.inf]))
+        popt2, pcov2 = curve_fit(func, x, y)
+    except:
+        print("Error (draw_smile_curve):", sys.exc_info()[0])
+        return -1, -1, -1
     # print(x_std)
-    plt.plot(x_std, func(x_std, *popt1), 'r--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt1))
-    plt.plot(x_std, func(x_std, *popt2), 'g--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt2))
-    plt.legend()
-    plt.show()
+    if plot:
+        plt.plot(x_std, func(x_std, *popt1), 'r--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt1))
+        plt.plot(x_std, func(x_std, *popt2), 'g--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt2))
+        plt.legend()
+        plt.show()
 
     return popt1
 
+def single_iv_est(raw, iv, hh, mm, kk, pp, v, plot=1):
+    # Construct database
+    database1 = build_temp_database(raw, iv, hh, mm)
+    # print(database1)
+    temp_minute = mm
+    # Choose data which has similar underlying asset spot price and similar maturity
+    database_all = []
+    database_5 = []
+    current_price = database1[0][4]
+    current_maturity = pp
+    database2 = []
+    database_temp1 = []
+    # database_temp2 = []
+    if 1:
+        while len(database2) < 50 and mm - temp_minute < 10:
+            threshold = 0
+            # prv_threshold = 0
+            temp_minute = temp_minute - 1
+            # while len(database_all) <= 50 && :
+            database_temp1 = build_temp_database(raw, iv, hh, temp_minute)
+            database2 = database2 + database_temp1
+        # Not Enough Data
+        if len(database2) < 5:
+            if v == 1:
+                return -1, -1
+            elif v == 2:
+                return -1, -1, -1, -1
+        for row in database2:
+            if row[4] == current_price and row[5] > 0:
+                database_all.append(row)
+                # print(row)
+        while threshold < 1:
+            prv_threshold = threshold
+            threshold = 1
+            for row in database2:
+                temp = abs(row[4] - current_price)
+                if temp < threshold and temp > prv_threshold:
+                    threshold = temp
+            for row in database2:
+                temp = abs(row[4] - current_price)
+                if temp <= threshold and temp > prv_threshold and row[5] > 0:
+                    database_all.append(row)
+        # print("Checkpoint1")
+        # #################### TEMP ############################
+        # database3 = []
+        # for row in database_all:
+        #     if row[2] < 200 and row[2] > 150:
+        #         database3.append(row)
+        #
+        # database_all = database3.copy()
+        # #################### TEMP ############################
 
+        # print(database_all)
+        threshold = 0
+        for row in database_all:
+            if row[1] == current_maturity:
+                database_5.append(row)
+                # print(row)
+            # Choose up to 5 points
+            if len(database_5) >= 5:
+                break
+        # print("Checkpoint2", len(database_5))
+        while len(database_5) < 5 and threshold <= 0.5:
+            prv_threshold = threshold
+            threshold = 1
+            for row in database_all:
+                # print(row)
+                temp = abs(row[1] - current_maturity)
+                if temp < threshold and temp > prv_threshold:
+                    threshold = temp
+            for row in database_all:
+                temp = abs(row[1] - current_maturity)
+                if temp <= threshold and temp > prv_threshold:
+                    database_5.append(row)
 
+    # Not Enough Data
+    if len(database_5) < 3:
+        if v == 1:
+            return -1, -1
+        elif v == 2:
+            return -1, -1, -1, -1
+    # print(database2, len(database1))
+
+    # Draw Smile Curve (X - K , Y - iv = sd^2)
+    # size = len(database2)
+    # draw_smile_curve(database2[size-10:])
+    # draw_smile_curve(database2[size-20:])
+    # draw_smile_curve(database2[size-30:])
+    # print("Size of data", len(database_5))
+    # print(database_5)
+    popt_5 = draw_smile_curve(database_5, current_price, kk, plot=plot)
+    if popt_5[0] == -1 and v == 1:
+        return -1, -1
+    popt_all = draw_smile_curve(database_all, current_price, kk, plot=plot)
+    if (popt_5[0] == -1 or popt_all[0] == -1) and v == 2:
+        return -1, -1, -1, -1
+
+    # Use the estimated curve to predict the volatility
+    est_vol_5 = func(kk, *popt_5)
+    est_sd_5 = sqrt(est_vol_5)
+    est_call_5, est_put_5 = bs_call_put(current_maturity, current_price, kk, est_sd_5)
+
+    print("5 sample test:   The estimated Call option price =: ", est_call_5)
+    print("5 sample test:   The estimated Put option price  =: ", est_put_5)
+
+    if v == 1:
+        return est_call_5, est_put_5
+
+    est_vol_all = func(kk, *popt_all)
+    est_sd_all = sqrt(est_vol_all)
+    est_call_all, est_put_all = bs_call_put(current_maturity, current_price, kk, est_sd_all)
+
+    # print("All sample test: The estimated Call option price =: ", est_call_5)
+    # print("All sample test: The estimated Put option price  =: ", est_put_5)
+
+    # if v == 2:
+    return est_call_5, est_put_5, est_call_all, est_put_all
 
 def iv_estimation(raw, iv):
     # Read input
     time = input("Input time for evaluation in 12-h format [hh:mm]: ")
     if time == "exit":
         return 0
-    k = input("Input the strike price to estimate option price: ")
+    k = input("Input the strike price: ")
     if k == "exit":
         return 0
     p = input("Input the expiration date in MM/DD/YYYY: ")
@@ -503,7 +624,7 @@ def iv_estimation(raw, iv):
         print("Invalid time!")
         return -1
     elif kk < 0:
-        print("Invalid K!")
+        print("Invalid K! Input should be one real number.")
         return -1
     elif pp < 0:
         print("Invalid maturity!")
@@ -520,78 +641,61 @@ def iv_estimation(raw, iv):
             return -1
         print("Estimating option price at K =", kk, "at", hh, ":", mm, "--")
 
-    # Construct database
-    database1 = build_temp_database(raw, iv, hh, mm)
-    temp_minute = mm
-    # Choose data which has similar underlying asset spot price and similar maturity
-    database_all = []
-    database_5 = []
-    current_price = database1[0][4]
-    current_maturity = pp
-    if 1:
-        threshold = 0
-        temp_minute = temp_minute - 1
-        while len(database_all) <= 50:
-            database2 = build_temp_database(raw, iv, hh, temp_minute)
-            for row in database2:
-                if row[4] == current_price and row[5] > 0:
-                    database_all.append(row)
-                    # print(row)
-            while threshold < 1:
-                prv_threshold = threshold
-                threshold = 1
-                for row in database2:
-                    temp = abs(row[4] - current_price)
-                    if temp < threshold and temp > prv_threshold:
-                        threshold = temp
-                for row in database2:
-                    temp = abs(row[4] - current_price)
-                    if temp <= threshold and temp > prv_threshold and row[5] > 0:
-                        database_all.append(row)
+    est_call_5, est_put_5, est_call_all, est_put_all = single_iv_est(raw, iv, hh, mm, kk, pp, v=2)
+    if est_call_5 == -1 and est_put_5 == -1:
+        print("Not Enough Data to predict option price.")
+        return -1
 
-        # print(database_all)
-        threshold = 0
-        for row in database_all:
-            if row[1] == current_maturity:
-                database_5.append(row)
-                print(row)
-            # Choose up to 5 points
-            if len(database_5) >= 5:
-                break
-            while len(database_5) < 5 and threshold <= 0.5:
-                prv_threshold = threshold
-                threshold = 0.5
-                for row in database_all:
-                    temp = abs(row[1] - current_maturity)
-                    if temp < threshold and temp > prv_threshold:
-                        threshold = temp
-                for row in database_all:
-                    temp = abs(row[1] - current_maturity)
-                    if temp <= threshold and temp > prv_threshold:
-                        database_5.append(row)
-    # print(database2, len(database1))
-
-    # Draw Smile Curve (X - K , Y - iv = sd^2)
-    # size = len(database2)
-    # draw_smile_curve(database2[size-10:])
-    # draw_smile_curve(database2[size-20:])
-    # draw_smile_curve(database2[size-30:])
-    popt_5 = draw_smile_curve(database_5, current_price, kk)
-    popt_all = draw_smile_curve(database_all, current_price, kk)
-
-    # Use the estimated curve to predict the volatility
-    est_vol_5 = func(kk, *popt_5)
-    est_vol_all = func(kk, *popt_all)
-    est_sd_5 = sqrt(est_vol_5)
-    est_sd_all = sqrt(est_vol_all)
-
-    # Predict option price [TODO]
-    est_call_5, est_put_5 = bs_call_put(current_maturity, current_price, kk, est_sd_5)
-    est_call_all, est_put_all = bs_call_put(current_maturity, current_price, kk, est_sd_all)
     print("5 sample test:   The estimated Call option price =: ", est_call_5)
     print("5 sample test:   The estimated Put option price  =: ", est_put_5)
     print("All sample test: The estimated Call option price =: ", est_call_5)
     print("All sample test: The estimated Put option price  =: ", est_put_5)
+
+def mass_iv_assessment(raw, iv):
+    # min_abs_err = 100
+    # max_abs_err = 0
+    # min_per_err = 100
+    # max_per_err = 0
+    size = len(raw)
+    diff_table = []
+    perc_table = []
+    # print(len(iv), len(raw))
+    for i in range(2581, size):  ############ DEBUG ##########
+        print(i, iv[i])
+        if iv[i][1] == '9' and iv[i][2] == '30':
+            # print("9:30 detected")
+            continue
+        hh, mm, kk, pp = convert_input(raw[i][25], raw[i][11], raw[i][10])
+        hh = int(iv[i][1])
+        mm = int(iv[i][2])
+        # print(hh,mm,kk,pp)
+        option_type = raw[i][12]
+        est_call_5, est_put_5 = single_iv_est(raw, iv, hh, mm, kk, pp, v=1, plot=0)
+        if est_call_5 == -1 and est_put_5 == -1:
+            print("Not enought data to predict option price.")
+            continue
+        actual_price = float(raw[i][5])
+        print("Actual Option:", option_type, actual_price)
+        diff = 0
+        if option_type == 'C':
+            diff = abs(est_call_5 - actual_price)
+            diff_call = est_call_5 - actual_price
+        elif option_type == 'P':
+            diff = abs(est_put_5 - actual_price)
+            diff_put = est_put_5 - actual_price
+        else:
+            print("Option Type Error: ", option_type)
+            continue
+        diff_table.append(diff)
+        perc_table.append(diff/actual_price)
+
+    size = len(diff_table)
+    avg_abs_diff = sum(diff_table)/size
+    avg_perc_diff = sum(perc_table)/size
+    print("Average absolute error is " + str(avg_abs_diff))
+    print("Average percentage error is " + str(avg_perc_diff))
+    print("Average (est_call_5 - actual_price) = ", diff_call/len(diff_call))
+    print("Average (est_put_5 - actual_price) = ", diff_put/len(diff_put))
 
 def main():
     # data = load_data("AAPL_032018.csv", header=1, predict_col=0)
@@ -696,9 +800,9 @@ def main():
         # min = ivtable[i][2]
         # sec = ivtable[i][3]
 
-    # Estimate option premium from IV
-    if 1:
-        global DATE
+    # Estimate individual option premium from IV
+    global DATE
+    if 0:
         DATE = input("Input today's date in MM/DD/YYYY: ")
         h,m,k,p = convert_input(p=DATE)
         if p != 0:
@@ -710,8 +814,20 @@ def main():
             if (iv_estimation(raw_data, iv_list) == 0):
                 break
     else:
-        print("IV estimation skipped")
+        print("Individual IV estimation skipped")
 
+    # Assess the accuracy of current IV method
+    if 1:
+        DATE = raw_data[1][3]
+        print("Date is ", DATE)
+        h,m,k,p = convert_input(p=DATE)
+        if p != 0:
+            # print(p)
+            print(DATE, "is not a valid date. Exiting")
+            exit(1)
+        mass_iv_assessment(raw_data, iv_list)
+    else:
+        print("Mass IV assessment skipped")
 
     # write into csv
     if 0:
