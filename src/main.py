@@ -6,8 +6,12 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import sys
 from scipy.optimize import curve_fit
-# import time
-
+import statistics
+import time
+from sklearn.svm import SVR
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import learning_curve
+from sklearn.kernel_ridge import KernelRidge
 
 ### GLOBAL VARIABLES ###
 # We set risk-free rate at 3.01%. Data obtained from treasury.gov, using Treasury 20-yr CMT
@@ -15,6 +19,8 @@ RATE = 0.0256
 DAY = 365
 BEST = 1
 DATE = '0-0-0'
+DATE = '3/20/2018'   ### DEBUG ###
+PT_NUM = 10
 
 # Calculate average R_t in the given data
 def average_volatility(raw, start=1, end=0):
@@ -234,93 +240,6 @@ def create_iv_csv(raw):
         if (opt_t == 'P'):
             # continue
             oc = 0
-        #     Nd1 = 0.08
-        # # Then, I will set a decreasing interval to find the volatility we are looking for
-        # gap = 0.1
-        # Nd1 = 0.9974349652396559#TEST
-        # # gap = 0.001#TEST
-        # # print("i_sd, d1-i_d1, d2-i_d2")
-        # count = 0
-        # # Call
-        # while oc:
-        #     print("Nd1 is " + str(Nd1))
-        #     # print(h, s, k)
-        #     if Nd1 < 0:
-        #         print("\n\nerror\n\n")
-        #         exit(1)#TEST
-        #         Nd1 = Nd1 + gap * 2
-        #         gap = gap * 0.1
-        #         count = count + 1
-        #         print("Gap is now " + str(gap) + "Nd1 is now " + str(Nd1))
-        #     if Nd1 >= 1:
-        #         Nd1 = 0.9999999999999
-        #         gap = 0.001
-        #         count = 3
-        #
-        #     # Compute N(d2)
-        #     Nd2 = (Nd1 * s - opt_p) / (k * exp(- RATE * h))
-        #     # Derive d1 and d2 using inverse Norm
-        #     d1 = scipy.stats.norm.ppf(Nd1)
-        #     d2 = scipy.stats.norm.ppf(Nd2)
-        #     print(d1, d2)
-        #     # Obtain implied standard deviation sinze d1 - d2 = sd * sqrt(maturity period)
-        #     i_sd = (d1 - d2) / sqrt(h)
-        #     # Check feasibility of d1 and d2 by recalculating d1 d2 using isd
-        #     i_d1, i_d2 = get_d1_d2(i_sd, h, s, k)
-        #     # Analyse result, adjust gap if necessary (i.e. when the absolute difference become larger)
-        #     print(i_sd, d1 - i_d1, d2 - i_d2)
-        #     if d1 - i_d1 < 0 or isnan(i_d1):
-        #         print("\n\ngap changed\n\n")
-        #         Nd1 = Nd1 + gap
-        #         gap = gap * 0.1
-        #         count = count + 1
-        #         print("Gap is now " + str(gap))
-        #     if count >= 16:
-        #         output.append([i_sd])
-        #         print(i_sd)
-        #         exit(1)#TEST
-        #         break
-        #     Nd1 = Nd1 - gap
-        #     exit(1)#TEST
-        # # Put
-        # while not oc:
-        #     # print("This is a put option")
-        #     if Nd1 > 1:
-        #         # print("\n\nerror\n\n")
-        #         Nd1 = Nd1 - gap * 2
-        #         gap = gap * 0.1
-        #         count = count + 1
-        #         # break
-        #     if Nd1 <= 0:
-        #         Nd1 = 0.000001
-        #         gap = 0.001
-        #         count = 3
-        #     # else:
-        #     # Compute N(d2)
-        #     # print("Nd1 is " + str(Nd1))
-        #     Nd2 = (Nd1 * s + opt_p) / (k * exp(- RATE * h))
-        #     # Derive d1 and d2 using inverse Norm
-        #     d1 = - scipy.stats.norm.ppf(Nd1)
-        #     d2 = - scipy.stats.norm.ppf(Nd2)
-        #     # print(d1,d2)
-        #     # Obtain implied standard deviation sinze d1 - d2 = sd * sqrt(maturity period)
-        #     i_sd = (d1 - d2) / sqrt(h)
-        #     # Check feasibility of d1 and d2 by recalculating d1 d2 using isd
-        #     i_d1, i_d2 = get_d1_d2(i_sd, h, s, k)
-        #     # Analyse result, adjust gap if necessary (i.e. when the absolute difference become larger)
-        #     # print(i_sd, d1 - i_d1, d2 - i_d2)
-        #     if d1 - i_d1 < 0 or isnan(i_d1):
-        #         # print("\n\ngap enlarged, " + str(count) + "\n\n")
-        #         Nd1 = Nd1 - gap
-        #         gap = gap * 0.1
-        #         count = count + 1
-        #     if count == 16:
-        #         output.append([i_sd])
-        #         # exit(1)#TEST
-        #         print(i_sd)
-        #         break
-        #     Nd1 = Nd1 + gap
-
 
         # Estimate volatility using brute force
         i_sd = 0.01
@@ -392,11 +311,15 @@ def convert_input(time='-1', k='-1', p='-1'):
         p = -1
     return hr, min, k, p
 
-def build_temp_database(raw, iv, hh, mm):
+def build_database(raw, iv, hh, mm, interval=0):
     # Handle overflow
-    if mm < 0:
+    while mm < 0:
         mm = 60 + mm
         hh = hh - 1
+    if hh<=9 and mm<30:
+        return [[-1,-1,-1,-1,-1,-1,-1,-1]]
+
+    mm2 = mm + interval
 
     # Extract useful data based on input to build a temporary database
     database = []
@@ -410,25 +333,33 @@ def build_temp_database(raw, iv, hh, mm):
         # 6. Minute
         # 7. Second
     size = len(iv)
-    for i in range(1, size):
-        if int(iv[i][1]) >= hh:
-            if int(iv[i][1]) == hh:
-                if int(iv[i][2]) >= mm:
-                    if int(iv[i][2]) == mm:
-                        # print("Time", hh, mm)
-                        database.append([float(raw[i][5]),                      # Option Trade Price
-                                         get_maturity(raw[i][3], raw[i][10]),   # Maturity
-                                         float(raw[i][11]),                     # Strike Price
-                                         raw[i][12],                            # Put or Call
-                                         float(raw[i][26]),                     # Stock Price
-                                         float(iv[i][0]),                       # Implied Volatility (sd)
-                                         float(iv[i][2]),                       # Minute
-                                         float(iv[i][3])                        # Second
-                                        ])
-                    else:
-                        break
-            else:
-                break
+    while 1:
+        for i in range(1, size):
+            if int(iv[i][1]) >= hh:
+                if int(iv[i][1]) == hh:
+                    if int(iv[i][2]) >= mm:
+                        if int(iv[i][2]) <= mm2 and float(iv[i][0]) > 0.05:
+                            # print("Time", hh, mm)
+                            database.append([float(raw[i][5]),                      # Option Trade Price
+                                             get_maturity(raw[i][3], raw[i][10]),   # Maturity
+                                             float(raw[i][11]),                     # Strike Price
+                                             raw[i][12],                            # Put or Call
+                                             float(raw[i][26]),                     # Stock Price
+                                             float(iv[i][0]),                       # Implied Volatility (sd)
+                                             float(iv[i][2]),                       # Minute
+                                             float(iv[i][3])                        # Second
+                                            ])
+                        else:
+                            break
+                else:
+                    break
+        if interval != 0 and mm2 >= 60:
+            mm2 = mm2 - 60
+            mm = 0
+            hh = hh + 1
+        else:
+            break
+
     # print(database, len(database))
     return database
 
@@ -458,21 +389,24 @@ def draw_smile_curve(database, current_price, kk, plot=1):
         # y[i] = database[i][5]
         x[i] = database[i][2]
 
+
+
     # Show distribution of data points
-    plt.scatter(x, y, s=10)
-    plt.plot(b, a)
-    plt.xlabel('Strike Price (K)')
-    plt.ylabel('Implied Volatility (σ^2)')
-    # plt.show()
+    # print(x)
+    # plt.scatter(x, y, s=10)
+    # plt.plot(b, a)
+    # plt.xlabel('Strike Price (K)')
+    # plt.ylabel('Implied Volatility (σ^2)')
     # time.sleep(20)
 
     try:
         # Use relevant data points to fit a curve
-        x_std = inc_seq(int(current_price * 0.5), int(current_price * 1.5))
+        # x_std = inc_seq(int(current_price * 0.5), int(current_price * 1.5))
+        x_std = inc_seq(80, 240)
         # popt = estimated [a, b, c]
         popt1, pcov1 = curve_fit(func, x, y, bounds=([0, current_price - 0.02, 0], [np.inf, current_price + 0.02, np.inf]))
-        # popt2, pcov2 = curve_fit(func, x, y, bounds=([0, -np.inf, -np.inf], [np.inf, np.inf, np.inf]))
-        popt2, pcov2 = curve_fit(func, x, y)
+        # popt2, pcov2 = curve_fit(func, x,`` y, bounds=([0, -np.inf, -np.inf], [np.inf, np.inf, np.inf]))
+        popt2, pcov2 = curve_fit(func, x, y, bounds=([0, -np.inf, 0], [np.inf, np.inf, np.inf]))
     except:
         print("Error (draw_smile_curve):", sys.exc_info()[0])
         return -1, -1, -1
@@ -480,14 +414,20 @@ def draw_smile_curve(database, current_price, kk, plot=1):
     if plot:
         plt.plot(x_std, func(x_std, *popt1), 'r--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt1))
         plt.plot(x_std, func(x_std, *popt2), 'g--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt2))
+        plt.scatter(x, y, s=10)
+
         plt.legend()
+        plt.grid()
         plt.show()
+        # plt.figure()    ### DEBUG ####
+        pass
 
-    return popt1
+    # return popt1
+    return popt2
 
-def single_iv_est(raw, iv, hh, mm, kk, pp, v, plot=1):
+def single_iv_est_quad(raw, iv, hh, mm, kk, pp, v, plot=1):
     # Construct database
-    database1 = build_temp_database(raw, iv, hh, mm)
+    database1 = build_database(raw, iv, hh, mm)
     # print(database1)
     temp_minute = mm
     # Choose data which has similar underlying asset spot price and similar maturity
@@ -498,75 +438,94 @@ def single_iv_est(raw, iv, hh, mm, kk, pp, v, plot=1):
     database2 = []
     database_temp1 = []
     # database_temp2 = []
-    if 1:
-        while len(database2) < 50 and mm - temp_minute < 10:
-            threshold = 0
-            # prv_threshold = 0
-            temp_minute = temp_minute - 1
-            # while len(database_all) <= 50 && :
-            database_temp1 = build_temp_database(raw, iv, hh, temp_minute)
-            database2 = database2 + database_temp1
-        # Not Enough Data
-        if len(database2) < 5:
-            if v == 1:
-                return -1, -1
-            elif v == 2:
-                return -1, -1, -1, -1
-        for row in database2:
-            if row[4] == current_price and row[5] > 0:
-                database_all.append(row)
-                # print(row)
-        while threshold < 1:
-            prv_threshold = threshold
-            threshold = 1
-            for row in database2:
-                temp = abs(row[4] - current_price)
-                if temp < threshold and temp > prv_threshold:
-                    threshold = temp
-            for row in database2:
-                temp = abs(row[4] - current_price)
-                if temp <= threshold and temp > prv_threshold and row[5] > 0:
-                    database_all.append(row)
-        # print("Checkpoint1")
-        # #################### TEMP ############################
-        # database3 = []
-        # for row in database_all:
-        #     if row[2] < 200 and row[2] > 150:
-        #         database3.append(row)
-        #
-        # database_all = database3.copy()
-        # #################### TEMP ############################
 
-        # print(database_all)
+
+    while len(database2) < 50 and mm - temp_minute < 10:
         threshold = 0
-        for row in database_all:
-            if row[1] == current_maturity:
-                database_5.append(row)
-                # print(row)
-            # Choose up to 5 points
-            if len(database_5) >= 5:
-                break
-        # print("Checkpoint2", len(database_5))
-        while len(database_5) < 5 and threshold <= 0.5:
-            prv_threshold = threshold
-            threshold = 1
-            for row in database_all:
-                # print(row)
-                temp = abs(row[1] - current_maturity)
-                if temp < threshold and temp > prv_threshold:
-                    threshold = temp
-            for row in database_all:
-                temp = abs(row[1] - current_maturity)
-                if temp <= threshold and temp > prv_threshold:
-                    database_5.append(row)
-
+        # prv_threshold = 0
+        temp_minute = temp_minute - 1
+        # while len(database_all) <= 50 && :
+        database_temp1 = build_database(raw, iv, hh, temp_minute)
+        database2 = database2 + database_temp1
     # Not Enough Data
-    if len(database_5) < 3:
+    if len(database2) < PT_NUM:
         if v == 1:
             return -1, -1
         elif v == 2:
             return -1, -1, -1, -1
-    # print(database2, len(database1))
+
+    # Set current price as the medean price of the obtained data
+    if 1:
+        underlying_asset_price = []
+        for row in database2:
+            underlying_asset_price.append(row[4])
+        current_price = statistics.median(underlying_asset_price)
+
+    # for row in database2:
+    #     if row[4] == current_price and row[5] > 0:
+    #         database_all.append(row)
+    #         # print(row)
+    #
+    # while threshold < 1:
+    #     prv_threshold = threshold
+    #     threshold = 1
+    #     for row in database2:
+    #         temp = abs(row[4] - current_price)
+    #         if temp < threshold and temp > prv_threshold:
+    #             threshold = temp
+    #     for row in database2:
+    #         temp = abs(row[4] - current_price)
+    #         if temp <= threshold and temp > prv_threshold and row[5] > 0:
+    #             database_all.append(row)
+
+    for row in database2:
+        if row[5] > 0:
+            database_all.append(row)
+            # print(row)
+
+    # print("Checkpoint1")
+    # #################### TEMP ############################
+    # database3 = []
+    # for row in database_all:
+    #     if row[2] < 200 and row[2] > 150:
+    #         database3.append(row)
+    #
+    # database_all = database3.copy()
+    # #################### TEMP ############################
+
+    # print(database_all)
+    threshold = 0
+    for row in database_all:
+        if row[1] == current_maturity:
+            database_5.append(row)
+            # print(row)
+        # Choose up to 5 points
+        if len(database_5) >= PT_NUM:
+            break
+    # print("Checkpoint2", len(database_5))
+    while len(database_5) < PT_NUM and threshold <= 0.5:
+        prv_threshold = threshold
+        threshold = 1
+        for row in database_all:
+            # print(row)
+            temp = abs(row[1] - current_maturity)
+            if temp < threshold and temp > prv_threshold:
+                threshold = temp
+        for row in database_all:
+            temp = abs(row[1] - current_maturity)
+            if temp <= threshold and temp > prv_threshold:
+                database_5.append(row)
+
+    # Not Enough Data
+    if len(database_5) < PT_NUM:
+        if v == 1:
+            return -1, -1
+        elif v == 2:
+            return -1, -1, -1, -1
+
+    #### DEBUG ###
+    # for row in database_5:
+    #     print(row)
 
     # Draw Smile Curve (X - K , Y - iv = sd^2)
     # size = len(database2)
@@ -584,11 +543,14 @@ def single_iv_est(raw, iv, hh, mm, kk, pp, v, plot=1):
 
     # Use the estimated curve to predict the volatility
     est_vol_5 = func(kk, *popt_5)
+    # print(est_vol_5)
     est_sd_5 = sqrt(est_vol_5)
     est_call_5, est_put_5 = bs_call_put(current_maturity, current_price, kk, est_sd_5)
 
-    print("5 sample test:   The estimated Call option price =: ", est_call_5)
-    print("5 sample test:   The estimated Put option price  =: ", est_put_5)
+    print("5 sample test:   The estimated implied volatility = ", est_vol_5)
+    print("5 sample test:   The estimated standard deviation = ", est_sd_5)
+    print("5 sample test:   The estimated Call option price = ", est_call_5)
+    print("5 sample test:   The estimated Put option price  = ", est_put_5)
 
     if v == 1:
         return est_call_5, est_put_5
@@ -603,17 +565,24 @@ def single_iv_est(raw, iv, hh, mm, kk, pp, v, plot=1):
     # if v == 2:
     return est_call_5, est_put_5, est_call_all, est_put_all
 
-def iv_estimation(raw, iv):
+# User input time, strike price and maturity
+def input_all(THRESHOLD=30):
     # Read input
-    time = input("Input time for evaluation in 12-h format [hh:mm]: ")
-    if time == "exit":
-        return 0
-    k = input("Input the strike price: ")
-    if k == "exit":
-        return 0
-    p = input("Input the expiration date in MM/DD/YYYY: ")
-    if p == "exit":
-        return 0
+    # time = input("Input time for evaluation in 12-h format [hh:mm]: ")
+    # if time == "exit":
+    #     return 0
+    # k = input("Input the strike price: ")
+    # if k == "exit":
+    #     return 0
+    # p = input("Input the expiration date in MM/DD/YYYY: ")
+    # if p == "exit":
+    #     return 0
+
+    ### DEBUG ###
+    time = "15:30"
+    k = "175"
+    p = "10/13/2018"
+    ### DEBUG ###
 
     # Convert input and validate
     hh, mm, kk, pp = convert_input(time, k, p)
@@ -636,12 +605,16 @@ def iv_estimation(raw, iv):
         if hh >= 16 or (hh == 9 and mm < 30):
             print("Invalid Trading Hour requested")
             return -1
-        elif hh == 9 and mm == 30:
+        elif hh == 9 and mm <= THRESHOLD:
             print("We cannot estimate option price at 9:30 due to lack of prior data.")
             return -1
         print("Estimating option price at K =", kk, "at", hh, ":", mm, "--")
+    return kk, hh, mm, pp
 
-    est_call_5, est_put_5, est_call_all, est_put_all = single_iv_est(raw, iv, hh, mm, kk, pp, v=2)
+def iv_estimation_quad(raw, iv):
+    kk, hh, mm, pp = input_all()
+
+    est_call_5, est_put_5, est_call_all, est_put_all = single_iv_est_quad(raw, iv, hh, mm, kk, pp, v=2)
     if est_call_5 == -1 and est_put_5 == -1:
         print("Not Enough Data to predict option price.")
         return -1
@@ -651,7 +624,7 @@ def iv_estimation(raw, iv):
     print("All sample test: The estimated Call option price =: ", est_call_5)
     print("All sample test: The estimated Put option price  =: ", est_put_5)
 
-def mass_iv_assessment(raw, iv):
+def mass_iv_assessment_quad(raw, iv, plot=0, specific=-1):
     # min_abs_err = 100
     # max_abs_err = 0
     # min_per_err = 100
@@ -659,18 +632,31 @@ def mass_iv_assessment(raw, iv):
     size = len(raw)
     diff_table = []
     perc_table = []
+    diff_call_table = []
+    diff_put_table = []
+    large_diff_table = []
     # print(len(iv), len(raw))
-    for i in range(2581, size):  ############ DEBUG ##########
+    for i in range(1, size):  ############ DEBUG ##########
+        if specific != -1:
+            i = specific
+            plot = 1
+        # print("Plot is ", plot)
         print(i, iv[i])
+        print(raw[i])
         if iv[i][1] == '9' and iv[i][2] == '30':
             # print("9:30 detected")
             continue
+        # Ignore those with volatility < 0 (Abnormal data)
+        if float(iv[i][0]) < 0:
+            continue
+
         hh, mm, kk, pp = convert_input(raw[i][25], raw[i][11], raw[i][10])
         hh = int(iv[i][1])
         mm = int(iv[i][2])
         # print(hh,mm,kk,pp)
         option_type = raw[i][12]
-        est_call_5, est_put_5 = single_iv_est(raw, iv, hh, mm, kk, pp, v=1, plot=0)
+        # print(hh, mm, kk, pp)
+        est_call_5, est_put_5 = single_iv_est_quad(raw, iv, hh, mm, kk, pp, v=1, plot=plot)
         if est_call_5 == -1 and est_put_5 == -1:
             print("Not enought data to predict option price.")
             continue
@@ -680,28 +666,268 @@ def mass_iv_assessment(raw, iv):
         if option_type == 'C':
             diff = abs(est_call_5 - actual_price)
             diff_call = est_call_5 - actual_price
+            diff_call_table.append(diff)
         elif option_type == 'P':
             diff = abs(est_put_5 - actual_price)
             diff_put = est_put_5 - actual_price
+            diff_put_table.append(diff)
         else:
             print("Option Type Error: ", option_type)
             continue
         diff_table.append(diff)
         perc_table.append(diff/actual_price)
+        if diff/actual_price > 0.15:
+            if option_type == 'C':
+                large_diff_table.append([i, diff/actual_price, option_type, est_call_5, actual_price])
+            if option_type == 'P':
+                large_diff_table.append([i, diff/actual_price, option_type, est_put_5, actual_price])
+
+        print("Perc diff is ", diff/actual_price)
+        #####DEBUG####
+        # if i == 5000:
+        #     print("DEBUG: break at i=5000")
+        #     break
+        #####DEBUG####
+        if specific != -1:
+            break
 
     size = len(diff_table)
     avg_abs_diff = sum(diff_table)/size
     avg_perc_diff = sum(perc_table)/size
+    avg_diff_call = 0
+    avg_diff_put = 0
+    if len(diff_call_table) != 0:
+        avg_diff_call = sum(diff_call_table)/len(diff_call_table)
+    if len(diff_put_table) != 0:
+        avg_diff_put = sum(diff_put_table)/len(diff_put_table)
+    print("Large Difference Table")
+    print(large_diff_table)
     print("Average absolute error is " + str(avg_abs_diff))
     print("Average percentage error is " + str(avg_perc_diff))
-    print("Average (est_call_5 - actual_price) = ", diff_call/len(diff_call))
-    print("Average (est_put_5 - actual_price) = ", diff_put/len(diff_put))
+    print("Average (est_call_5 - actual_price) = ", avg_diff_call)
+    print("Average (est_put_5 - actual_price) = ", avg_diff_put)
+
+############ SVR ####################
+# How to Tune parameters of SVR:
+#  - C: How harsh error will be penalized (larger C gives bigger penalty)
+#  - epsilon: Within this bound, error is not counted
+#  - gamma: How curvy your curve will be (smaller gamma gives straighter lines))
+
+
+def single_iv_estimation_svr(raw, iv, hh, mm, kk, pp, plot=1, method="kr"):
+    # Extract database - clean data
+    # Limit the range of data
+    temp = mm + 4
+    database_f = []
+    while len(database_f) < 20:
+        temp = temp - 5
+        database_5 = build_database(raw, iv, hh, temp, 5)
+        if database_5[0][0] == -1:
+            break
+        # Fix Underlying Asset Price
+        uap_list = []
+        MAX = 0
+        MIN = 10000000
+        for row in database_5:
+            uap_list.append(row[4])
+        current_price = statistics.median(uap_list)
+        # Filter data based on maturity
+        current_maturity = pp
+        for row in database_5:
+            abs_diff = abs(row[1] - current_maturity)/current_maturity
+            if abs_diff < 0.5 and row[5] >0:
+                database_f.append(row)
+    print("database_f size: ", len(database_f))
+    if len(database_f) < 20:
+        return -1, -1
+
+    # draw_smile_curve(database_f, current_price, kk, 1)
+    # Fit a smile curve based on prepared database_f using SVR
+    if method=="svr":
+        svr = GridSearchCV(SVR(kernel='rbf'), cv=3,
+                       param_grid={
+                                    "C": [1e3, 1e4, 1e5],
+                                   'epsilon':[0.001, 0.002, 0.003],
+                                   "gamma": [1e-6, 1e-5, 1e-4]
+                                   })
+    # svr = GridSearchCV(SVR(kernel='poly', degree=2, gamma=1e5, epsilon=0.01, C=1e5), cv=3,
+    #                    param_grid={
+    #                                #  "C": [1e3, 1e4, 1e5],
+    #                                # 'epsilon':[0.001, 0.002, 0.003],
+    #                                # "gamma": [1e-6, 1e-5, 1e-4, 1e-2]
+    #                                })
+
+    # ##### DEBUG #####
+    # svr = GridSearchCV(KernelRidge(kernel='poly', degree=2, gamma=1e-3, alpha=1e0), cv=3,
+    #                   param_grid={
+    #                               # "alpha": [1e0, 0.1, 1e-2, 1e1],
+    #                               #"gamma": np.logspace(-2, 2, 5)
+    #                               })
+
+    if method=="kr":
+        kr = GridSearchCV(KernelRidge(kernel='rbf'), cv=3,
+                      param_grid={
+                                  "alpha": [1e-2, 1e-3, 1e-4, 1e-5, 1e-6],
+                                  "gamma": [1e-5, 1e-4, 1e-2, 1e-1, 1e1, 1e2]
+                                  })
+    # Form X - List of strike price & y - List of iv
+    X = []
+    y = []
+    for row in database_f:
+        X.append([row[2]])
+        y.append(row[5]*row[5])
+        if row[2] > MAX:
+            MAX = row[2]
+        if row[2] < MIN:
+            MIN = row[2]
+    # X.sort()
+    # y.sort()
+
+    # print(X)
+    # print(y)
+
+    if method=="svr":
+        svr.fit(X, y)
+    elif method=="kr":
+        kr.fit(X, y)
+    # print("Estimation Model: SVR")
+    # print("Best parameters:", svr.best_params_)
+    # print("Best score:", svr.best_score_)
+    # print("Estimation Model: KR")
+    # print("Best parameters:", kr.best_params_)
+    # print("Best score:", kr.best_score_)
+    # print(X)
+    # Plot
+    if plot:
+        X_plot = np.linspace(80, 340, 260)[:, None]
+        # X_plot = np.linspace(MIN, MAX, 160)[:, None]
+        if method=="svr":
+            y_svr = svr.predict(X_plot)
+            plt.plot(X_plot, y_svr, c='r', label='fit: SVR')
+        elif method=="kr":
+            y_kr = kr.predict(X_plot)
+            plt.plot(X_plot, y_kr, c='grey', label='fir: KR')
+        plt.scatter(X, y, s=5, label='Actual Data')
+        plt.xlabel('Strike Price (K)')
+        plt.ylabel('Implied Volatility (σ^2)')
+        plt.legend()
+        plt.show()
+
+    # print(X)
+    # print(y_svr)
+
+    # Output
+    # print(svr.predict([[kk]]))
+    if method=="svr":
+        est_vol = svr.predict([[kk]])
+    elif method=="kr":
+        est_vol = kr.predict([[kk]])
+    if est_vol[0] < 0:
+        return -2, -2
+    est_sd = sqrt(est_vol[0])
+
+    est_call, est_put = bs_call_put(current_maturity, current_price, kk, est_sd)
+    print("The estimated implied volatility = ", est_vol)
+    print("The estimated standard deviation = ", est_sd)
+    print("The estimated Call option price = ", est_call)
+    print("The estimated Put option price  = ", est_put)
+    return est_call, est_put
+
+
+def iv_estimation_svr(raw, iv):
+    kk, hh, mm, pp = input_all(32)
+    est_call, est_put = single_iv_estimation_svr(raw, iv, hh, mm, kk, pp)
+    print("All sample test: The estimated Call option price =: ", est_call)
+    print("All sample test: The estimated Put option price  =: ", est_put)
+    return 1
+
+def mass_iv_assessment_svr(raw, iv, plot=0, specific=-1, method="kr"):
+    size = len(raw)
+    diff_table = []
+    perc_table = []
+    diff_call_table = []
+    diff_put_table = []
+    large_diff_table = []
+    abnormal_table = []
+    # print(len(iv), len(raw))
+    for i in range(1, size):  ############ DEBUG ##########
+        if specific != -1:
+            i = specific
+            plot = 1
+        # print("Plot is ", plot)
+        print(i, iv[i])
+        print(raw[i])
+        if iv[i][1] == '9' and iv[i][2] == '30':
+            # print("9:30 detected")
+            continue
+        # Ignore those with volatility < 0 (Abnormal data)
+        if float(iv[i][0]) < 0:
+            continue
+
+        hh, mm, kk, pp = convert_input(raw[i][25], raw[i][11], raw[i][10])
+        hh = int(iv[i][1])
+        mm = int(iv[i][2])
+        # print(hh,mm,kk,pp)
+        option_type = raw[i][12]
+        # print(hh, mm, kk, pp)
+        est_call, est_put = single_iv_estimation_svr(raw, iv, hh, mm, kk, pp, plot=plot, method=method)
+        if est_call == -1 and est_put == -1:
+            print("Not enought data to predict option price.")
+            abnormal_table.append(i)
+            continue
+        elif est_call == -2 and est_put == -2:
+            print("Negative iv detected")
+            abnormal_table.append(i)
+            continue
+
+        actual_price = float(raw[i][5])
+        print("Actual Option:", option_type, actual_price)
+        diff = 0
+        if option_type == 'C':
+            diff = abs(est_call - actual_price)
+            diff_call = est_call - actual_price
+            diff_call_table.append(diff)
+        elif option_type == 'P':
+            diff = abs(est_put - actual_price)
+            diff_put = est_put - actual_price
+            diff_put_table.append(diff)
+        else:
+            print("Option Type Error: ", option_type)
+            continue
+        diff_table.append(diff)
+        perc_table.append(diff/actual_price)
+        if diff/actual_price > 0.15:
+            if option_type == 'C':
+                large_diff_table.append([i, diff/actual_price, option_type, est_call, actual_price])
+            if option_type == 'P':
+                large_diff_table.append([i, diff/actual_price, option_type, est_put, actual_price])
+
+        print("Perc diff is ", diff/actual_price)
+        #####DEBUG####
+        # if i == 5000:
+        #     print("DEBUG: break at i=5000")
+        #     break
+        #####DEBUG####
+        if specific != -1:
+            break
+
+    size = len(diff_table)
+    avg_abs_diff = sum(diff_table)/size
+    avg_perc_diff = sum(perc_table)/size
+    avg_diff_call = 0
+    avg_diff_put = 0
+    if len(diff_call_table) != 0:
+        avg_diff_call = sum(diff_call_table)/len(diff_call_table)
+    if len(diff_put_table) != 0:
+        avg_diff_put = sum(diff_put_table)/len(diff_put_table)
+    print("Large Difference Table")
+    print(large_diff_table)
+    print("Average absolute error is " + str(avg_abs_diff))
+    print("Average percentage error is " + str(avg_perc_diff))
+    print("Average (est_call_5 - actual_price) = ", avg_diff_call)
+    print("Average (est_put_5 - actual_price) = ", avg_diff_put)
 
 def main():
-    # data = load_data("AAPL_032018.csv", header=1, predict_col=0)
-    # print(data.X)
-    # print(data.y)
-
     # Use csv library to import data
 
     # Load historical option data on 2018/3/2
@@ -724,13 +950,6 @@ def main():
             # print(iv_list[1][0], iv_list[1][1], iv_list[1][2], iv_list[1][3])
     else:
         print("IV csv skipped")
-
-    # # Test printing
-    # for i in range (2):
-    #     print(raw_data[i])
-    # for i in range (2):
-    #     print(raw_hp[i])
-
 
     # # Test function (All data)
     # volatility = get_volatility(raw_hp)
@@ -800,8 +1019,9 @@ def main():
         # min = ivtable[i][2]
         # sec = ivtable[i][3]
 
-    # Estimate individual option premium from IV
     global DATE
+    ####################### QUADRATIC #################
+    # Estimate individual option premium from IV (Quadratic)
     if 0:
         DATE = input("Input today's date in MM/DD/YYYY: ")
         h,m,k,p = convert_input(p=DATE)
@@ -811,12 +1031,51 @@ def main():
             exit(1)
         while 1:
             print(" --- Start estimating option premium from implied volatility --- ")
-            if (iv_estimation(raw_data, iv_list) == 0):
+            if (iv_estimation_quad(raw_data, iv_list) == 0):
                 break
     else:
-        print("Individual IV estimation skipped")
+        print("Individual IV estimation (Quadratic) skipped")
 
-    # Assess the accuracy of current IV method
+    # Assess the accuracy of current IV method (Quadratic)
+    if 0:
+        DATE = raw_data[1][3]
+        print("Date is ", DATE)
+        h,m,k,p = convert_input(p=DATE)
+        if p != 0:
+            # print(p)
+            print(DATE, "is not a valid date. Exiting")
+            exit(1)
+        mass_iv_assessment_quad(raw_data, iv_list)
+    else:
+        print("Mass IV assessment (Quadratic) skipped")
+
+    # Check one specific record in database (Quadratic)
+    if 0:
+        DATE = raw_data[1][3]
+        x = input("Enter the row number for assessment: ")
+        mass_iv_assessment_quad(raw_data, iv_list, plot=1, specific=int(x))
+    else:
+        print("Specific IV assessment (Quadratic) skipped")
+    ################ QUADRATIC ####################
+
+    ################ SVR ####################
+    # Estimate individual option premium from IV (SVR)
+    if 0:
+        # DATE = input("Input today's date in MM/DD/YYYY: ")
+        h,m,k,p = convert_input(p=DATE)
+        if p != 0:
+            # print(p)
+            print(DATE, "is not a valid date. Exiting")
+            exit(1)
+        while 1:
+            print(" --- Start estimating option premium from implied volatility --- ")
+            if (iv_estimation_svr(raw_data, iv_list) == 0):
+                break
+            break  ### DEBUG ###
+    else:
+        print("Individual IV estimation (SVR) skipped")
+
+    # Assess the accuracy of current IV method (SVR)
     if 1:
         DATE = raw_data[1][3]
         print("Date is ", DATE)
@@ -825,9 +1084,17 @@ def main():
             # print(p)
             print(DATE, "is not a valid date. Exiting")
             exit(1)
-        mass_iv_assessment(raw_data, iv_list)
+        mass_iv_assessment_svr(raw_data, iv_list, plot=0, method="kr")
     else:
-        print("Mass IV assessment skipped")
+        print("Mass IV assessment (SVR) skipped")
+
+    # Check one specific record in database (SVR)
+    if 0:
+        DATE = raw_data[1][3]
+        x = input("Enter the row number for assessment: ")
+        mass_iv_assessment_svr(raw_data, iv_list, plot=1, specific=int(x))
+    else:
+        print("Specific IV assessment (SVR) skipped")
 
     # write into csv
     if 0:
