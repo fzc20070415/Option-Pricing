@@ -635,6 +635,7 @@ def mass_iv_assessment_quad(raw, iv, plot=0, specific=-1):
     diff_call_table = []
     diff_put_table = []
     large_diff_table = []
+    abnormal_table = []
     # print(len(iv), len(raw))
     for i in range(1, size):  ############ DEBUG ##########
         if specific != -1:
@@ -659,6 +660,7 @@ def mass_iv_assessment_quad(raw, iv, plot=0, specific=-1):
         est_call_5, est_put_5 = single_iv_est_quad(raw, iv, hh, mm, kk, pp, v=1, plot=plot)
         if est_call_5 == -1 and est_put_5 == -1:
             print("Not enought data to predict option price.")
+            abnormal_table.append(i)
             continue
         actual_price = float(raw[i][5])
         print("Actual Option:", option_type, actual_price)
@@ -922,6 +924,8 @@ def mass_iv_assessment_svr(raw, iv, plot=0, specific=-1, method="kr"):
         avg_diff_put = sum(diff_put_table)/len(diff_put_table)
     print("Large Difference Table")
     print(large_diff_table)
+    print("\n\n\nAbnormal Table")
+    print(abnormal_table)
     print("Average absolute error is " + str(avg_abs_diff))
     print("Average percentage error is " + str(avg_perc_diff))
     print("Average (est_call_5 - actual_price) = ", avg_diff_call)
@@ -1037,7 +1041,7 @@ def main():
         print("Individual IV estimation (Quadratic) skipped")
 
     # Assess the accuracy of current IV method (Quadratic)
-    if 0:
+    if 1:
         DATE = raw_data[1][3]
         print("Date is ", DATE)
         h,m,k,p = convert_input(p=DATE)
@@ -1076,7 +1080,7 @@ def main():
         print("Individual IV estimation (SVR) skipped")
 
     # Assess the accuracy of current IV method (SVR)
-    if 1:
+    if 0:
         DATE = raw_data[1][3]
         print("Date is ", DATE)
         h,m,k,p = convert_input(p=DATE)
