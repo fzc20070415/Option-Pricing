@@ -1041,7 +1041,7 @@ def main():
         print("Individual IV estimation (Quadratic) skipped")
 
     # Assess the accuracy of current IV method (Quadratic)
-    if 1:
+    if 0:
         DATE = raw_data[1][3]
         print("Date is ", DATE)
         h,m,k,p = convert_input(p=DATE)
@@ -1080,7 +1080,7 @@ def main():
         print("Individual IV estimation (SVR) skipped")
 
     # Assess the accuracy of current IV method (SVR)
-    if 0:
+    if 1:
         DATE = raw_data[1][3]
         print("Date is ", DATE)
         h,m,k,p = convert_input(p=DATE)
