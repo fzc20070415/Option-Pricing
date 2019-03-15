@@ -135,7 +135,8 @@ def estimate_call_put(raw, vol, start=1, end=0):
     # Obtain maturity of option
 
     if sd == 0:
-        # If volatility is 0, call/put options will have price of 0 since future prices of stock price is fully predicatable with no risk.
+        # If volatility is 0, call/put options will have price of 0
+        # since future prices of stock price is fully predicatable with no risk.
         return [[0,0]]*r
 
     output = []
@@ -785,8 +786,8 @@ def single_iv_estimation_svr(raw, iv, hh, mm, kk, pp, plot=1, method="kr"):
     if method=="kr":
         kr = GridSearchCV(KernelRidge(kernel='rbf'), cv=3,
                       param_grid={
-                                  "alpha": [1e-2, 1e-3, 1e-4, 1e-5, 1e-6],
-                                  "gamma": [1e-5, 1e-4, 1e-2, 1e-1, 1e1, 1e2]
+                                  "alpha": [1e0, 0.1, 1e-2, 1e1],
+                                  "gamma": np.logspace(-2, 2, 5)
                                   })
     # Form X - List of strike price & y - List of iv
     X = []
@@ -1111,8 +1112,9 @@ def main():
     else:
         print("Individual IV estimation (SVR) skipped")
 
-    # Assess the accuracy of current IV method (SVR)
-    if 0:
+    # Assess the accuracy of current IV method (SVR/KR)
+    METHOD = "svr"
+    if 1:
         DATE = raw_data[1][3]
         print("Date is ", DATE)
         h,m,k,p = convert_input(p=DATE)
@@ -1120,20 +1122,20 @@ def main():
             # print(p)
             print(DATE, "is not a valid date. Exiting")
             exit(1)
-        mass_iv_assessment_svr(raw_data, iv_list, plot=1, method="svr")
+        mass_iv_assessment_svr(raw_data, iv_list, plot=1, method=METHOD)
     else:
-        print("Mass IV assessment (SVR) skipped")
+        print("Mass IV assessment (SVR/KR) skipped")
 
-    # Check one specific record in database (SVR)
+    # Check one specific record in database (SVR/KR)
     if 0:
         DATE = raw_data[1][3]
         x = input("Enter the row number for assessment: ")
-        mass_iv_assessment_svr(raw_data, iv_list, plot=1, specific=int(x))
+        mass_iv_assessment_svr(raw_data, iv_list, plot=1, specific=int(x), method=METHOD)
     else:
-        print("Specific IV assessment (SVR) skipped")
+        print("Specific IV assessment (SVR/KR) skipped")
 
     # write into csv
-    if 1:
+    if 0:
         with open("../report/report.csv", 'w') as book:
             wr = csv.writer(book, delimiter=',', lineterminator='\n')
             for row in report:
