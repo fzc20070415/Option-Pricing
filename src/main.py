@@ -15,7 +15,7 @@ from sklearn.kernel_ridge import KernelRidge
 
 ### GLOBAL VARIABLES ###
 # We set risk-free rate at 3.01%. Data obtained from treasury.gov, using Treasury 20-yr CMT
-RATE = 0.0256
+RATE = 0.0301
 DAY = 365
 BEST = 1
 DATE = '0-0-0'
@@ -30,10 +30,10 @@ def average_volatility(raw, start=1, end=0):
     count = 0
     # print("Number of records = " + str(r))
     sum = 0
-    for i in range (r):
-        if i <= start:
-            continue
-        if end != 0 and i >= end:
+    for i in range (start + 1, r):
+        # if i <= start:
+        #     continue
+        if end != 0 and i > end:
             break
         p1 = float(raw[i-1][4])
         p2 = float(raw[i][4])
@@ -41,7 +41,6 @@ def average_volatility(raw, start=1, end=0):
         # print(temp1)
         sum = sum + temp1
         count = count + 1
-
     avg = sum/count
     # print("Sum is " + str(sum))
     # print("Avg is " + str(avg))
@@ -55,16 +54,18 @@ def get_volatility(raw, start=1, end=0):
     sum = 0
     count = 0
     avg = average_volatility(raw, start=start, end=end)
-    for i in range(r):
-        if i <= start:
-            continue
-        if end != 0 and i >= end:
+    for i in range(start+1, r):
+        # print("i start end =", i, start, end)
+        # if i <= start:
+        #     continue
+        if end != 0 and i > end:
             break
         p1 = float(raw[i-1][4])
         p2 = float(raw[i][4])
         temp1 = log(p2/p1)
         sum = sum + temp1 * temp1
         count = count + 1
+    # print("count =", count)
 
     # Use variance formula which \sum (X-E[X])^2 = E[X^2] - E[X]^2
     E_X2 = sum/count
@@ -75,6 +76,9 @@ def get_volatility(raw, start=1, end=0):
     return var
 
 def get_maturity(raw_trade, raw_expire):
+    # parameter:
+        # raw_trade - trade date of the option
+        # raw_expire - expiration date of the option
     # print("GET_MATURITY CALLED", raw_trade, raw_expire)
     trade_date = datetime.strptime(raw_trade, '%m/%d/%Y')
     trade_days = float(datetime.strftime(trade_date, '%j')) * DAY / 365
@@ -89,6 +93,11 @@ def get_maturity(raw_trade, raw_expire):
 
 # Calculate d1 and d2
 def get_d1_d2(sd, h, s, k):
+    # parameter:
+        # sd - sqrt(Volatility)
+        # h - Maturity
+        # s - Stock Price, S_0
+        # k - Strike Price, K
     d1 = (1/(sd * sqrt(h))) * ((log(s/k)) + (RATE + ((sd * sd)/2)) * h)
     # Use d2 = d1 - sqrt(vol) * sqrt(maturity)
     d2 = d1 - ( sd * sqrt(h) )
@@ -97,6 +106,11 @@ def get_d1_d2(sd, h, s, k):
 
 # Estimate option price using BS formula
 def bs_call_put(h, s, k, sd):
+    # parameter:
+        # h - Maturity
+        # s - Stock Price, S_0
+        # k - Strike Price, K
+        # sd - sqrt(Volatility)
     d1, d2 = get_d1_d2(sd, h, s, k)
     # We ignore divident here
     N1 = scipy.stats.norm.cdf(d1)
@@ -119,6 +133,10 @@ def estimate_call_put(raw, vol, start=1, end=0):
     sd = sqrt(vol)
     # print("Standard Deviation is " + str(sd))
     # Obtain maturity of option
+
+    if sd == 0:
+        # If volatility is 0, call/put options will have price of 0 since future prices of stock price is fully predicatable with no risk.
+        return [[0,0]]*r
 
     output = []
 
@@ -145,12 +163,11 @@ def estimate_call_put(raw, vol, start=1, end=0):
         call, put = bs_call_put(year_difference, S, K, sd)
         output.append([call, put])
         # print((call, put))
-        # if i == 10:
-        #     break
+
     return output
 
 # Evaluate how accurate my estimation is
-def check_estimation(est, raw, start=1, end=0):
+def check_estimation(est, raw, start=1, end=0, plot=0):
     # parameters:
         # est - estimated call & put prices
         # raw - raw_data (including header)
@@ -161,9 +178,7 @@ def check_estimation(est, raw, start=1, end=0):
     perc_table = []
     est_l = []
     act_l = []
-    for i in range(r):
-        if i < start:
-            continue
+    for i in range(start, r):
         if i >= end and end != 0:
             break
         act_i = float(raw[i][5])
@@ -201,11 +216,12 @@ def check_estimation(est, raw, start=1, end=0):
     # TODO
 
     # Plot Dots vs Linear
-    # plt.scatter(est_l, act_l)
-    # plt.plot([1],[1])
-    # plt.xlabel('estimated data')
-    # plt.ylabel('actual data')
-    # plt.show()
+    if plot:
+        plt.scatter(est_l, act_l)
+        plt.plot([1],[1])
+        plt.xlabel('estimated data')
+        plt.ylabel('actual data')
+        plt.show()
 
     return avg_abs_diff, avg_perc_diff
 
@@ -568,20 +584,20 @@ def single_iv_est_quad(raw, iv, hh, mm, kk, pp, v, plot=1):
 # User input time, strike price and maturity
 def input_all(THRESHOLD=30):
     # Read input
-    # time = input("Input time for evaluation in 12-h format [hh:mm]: ")
-    # if time == "exit":
-    #     return 0
-    # k = input("Input the strike price: ")
-    # if k == "exit":
-    #     return 0
-    # p = input("Input the expiration date in MM/DD/YYYY: ")
-    # if p == "exit":
-    #     return 0
+    time = input("Input time for evaluation in 12-h format [hh:mm]: ")
+    if time == "exit":
+        return 0
+    k = input("Input the strike price: ")
+    if k == "exit":
+        return 0
+    p = input("Input the expiration date in MM/DD/YYYY: ")
+    if p == "exit":
+        return 0
 
     ### DEBUG ###
-    time = "15:30"
-    k = "175"
-    p = "10/13/2018"
+    # time = "15:30"
+    # k = "175"
+    # p = "10/13/2018"
     ### DEBUG ###
 
     # Convert input and validate
@@ -752,12 +768,12 @@ def single_iv_estimation_svr(raw, iv, hh, mm, kk, pp, plot=1, method="kr"):
                                    'epsilon':[0.001, 0.002, 0.003],
                                    "gamma": [1e-6, 1e-5, 1e-4]
                                    })
-    # svr = GridSearchCV(SVR(kernel='poly', degree=2, gamma=1e5, epsilon=0.01, C=1e5), cv=3,
-    #                    param_grid={
-    #                                #  "C": [1e3, 1e4, 1e5],
-    #                                # 'epsilon':[0.001, 0.002, 0.003],
-    #                                # "gamma": [1e-6, 1e-5, 1e-4, 1e-2]
-    #                                })
+        # svr = GridSearchCV(SVR(kernel='poly', degree=2, gamma=1e5, epsilon=0.01, C=1e5), cv=3,
+        #                    param_grid={
+        #                                #  "C": [1e3, 1e4, 1e5],
+        #                                # 'epsilon':[0.001, 0.002, 0.003],
+        #                                # "gamma": [1e-6, 1e-5, 1e-4, 1e-2]
+        #                                })
 
     # ##### DEBUG #####
     # svr = GridSearchCV(KernelRidge(kernel='poly', degree=2, gamma=1e-3, alpha=1e0), cv=3,
@@ -961,18 +977,20 @@ def main():
     # # Evaluation
     # check_estimation(call_put_table, raw_data)
 
-    report = [['First Period', 'last Period', 'Risk Free Rate', 'Estimated Volatility', 'Avg Abs Err', 'Avg Perc Err']]
+    report = []
 
     ### Task 1: HV ###
     # Test with different volatility and different risk free rate to obtain the least error.
     if 0:
+        report = [['First Period', 'last Period', 'Risk Free Rate', 'Estimated Volatility', 'Avg Abs Err', 'Avg Perc Err']]
         len_hp = len(raw_hp)
         global RATE
         rate = RATE
         for r in range(0, 500, 50):
-            print(r)
-            RATE = rate - r*0.00001
+            # print(r)
+            # RATE = rate - r*0.00001
             for i in range(1, len_hp, 20):
+                # break
                 for j in range(0, len_hp, 100):
                     k = len_hp - j - 1
                     k = 2045   # fix to the last day
@@ -990,6 +1008,20 @@ def main():
                     avg_abs_err, avg_perc_err = check_estimation(call_put_table, raw_data)
                     report.append([raw_hp[i][0], raw_hp[k][0], RATE, volatility, avg_abs_err, avg_perc_err])
                     break   # Temporary Test
+            break
+
+        for i in range(1995, 2045):
+            # k = len_hp - j - 1
+            k = 2045   # fix to the last day
+            # Estimate volatility using data from i to k
+            print("Using rate = " + str(RATE))
+            print("Using data from " + raw_hp[i][0] + " to " + raw_hp[k][0])
+            volatility = get_volatility(raw_hp, start=i, end=k)
+            call_put_table = estimate_call_put(raw_data, volatility)
+
+            avg_abs_err, avg_perc_err = check_estimation(call_put_table, raw_data)
+            report.append([raw_hp[i][0], raw_hp[k][0], RATE, volatility, avg_abs_err, avg_perc_err])
+
     else:
         print("HV skipped")
 
@@ -1080,7 +1112,7 @@ def main():
         print("Individual IV estimation (SVR) skipped")
 
     # Assess the accuracy of current IV method (SVR)
-    if 1:
+    if 0:
         DATE = raw_data[1][3]
         print("Date is ", DATE)
         h,m,k,p = convert_input(p=DATE)
@@ -1088,7 +1120,7 @@ def main():
             # print(p)
             print(DATE, "is not a valid date. Exiting")
             exit(1)
-        mass_iv_assessment_svr(raw_data, iv_list, plot=0, method="kr")
+        mass_iv_assessment_svr(raw_data, iv_list, plot=1, method="svr")
     else:
         print("Mass IV assessment (SVR) skipped")
 
@@ -1101,7 +1133,7 @@ def main():
         print("Specific IV assessment (SVR) skipped")
 
     # write into csv
-    if 0:
+    if 1:
         with open("../report/report.csv", 'w') as book:
             wr = csv.writer(book, delimiter=',', lineterminator='\n')
             for row in report:
