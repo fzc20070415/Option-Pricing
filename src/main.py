@@ -88,7 +88,7 @@ def get_volatility(raw, start=1, end=0):
     var = E_X2 - avg * avg
     # We times volatility of one business day with #business days
     var = 260 * var
-    write_log("Estimated volatility is " + str(var))
+    write_log("Estimated volatility^2 is " + str(var))
     return var
 
 def get_maturity(raw_trade, raw_expire):
@@ -110,7 +110,7 @@ def get_maturity(raw_trade, raw_expire):
 # Calculate d1 and d2
 def get_d1_d2(sd, h, s, k):
     # parameter:
-        # sd - sqrt(Volatility)
+        # sd - Volatility = sqrt(Variance)
         # h - Maturity
         # s - Stock Price, S_0
         # k - Strike Price, K
@@ -126,7 +126,7 @@ def bs_call_put(h, s, k, sd):
         # h - Maturity
         # s - Stock Price, S_0
         # k - Strike Price, K
-        # sd - sqrt(Volatility)
+        # sd - Volatility = sqrt(Variance)
     d1, d2 = get_d1_d2(sd, h, s, k)
     # We ignore divident here
     N1 = scipy.stats.norm.cdf(d1)
@@ -141,7 +141,7 @@ def bs_call_put(h, s, k, sd):
 def estimate_call_put(raw, vol, start=1, end=0):
     # parameters:
         # raw - raw_data (including header)
-        # vol - estimated volatility
+        # vol - estimated volatility^2
         # start - starting row
         # end - ending row
     r = len(raw)
@@ -537,11 +537,15 @@ def single_iv_estimation_svr(raw, iv, tm, kk, pp, plot=1, method="kr"):
     database_f = []
     left_bound_ind = 0
     right_bound_ind = 0
-    while len(database_f) < 20 or not left_bound_ind or not right_bound_ind:
+    while len(database_f) < 10 or not left_bound_ind or not right_bound_ind:
+        if len(database_f) > 200:
+            break
         tm = tm - timedelta(minutes=2)
         database_5 = build_database(raw, iv, tm, 2)
         # print("datasbase_5")
         # print(database_5)
+        if len(database_5) == 0:
+            continue
         if database_5[0][0] == -1:
             break
         # Fix Underlying Asset Price
@@ -554,8 +558,9 @@ def single_iv_estimation_svr(raw, iv, tm, kk, pp, plot=1, method="kr"):
         # Filter data based on maturity
         current_maturity = pp
         for row in database_5:
-            abs_diff = abs(row[1] - current_maturity)/current_maturity
-            if abs_diff < 0.2 and row[5] >0:
+            # abs_diff = abs(row[1] - current_maturity)/current_maturity
+            # if abs_diff < 0.15 and row[5] >0:
+            if row[1] == current_maturity:
                 database_f.append(row)
                 if row[2] < kk:
                     left_bound_ind = 1
@@ -563,7 +568,7 @@ def single_iv_estimation_svr(raw, iv, tm, kk, pp, plot=1, method="kr"):
                     right_bound_ind = 1
     write_log("database_f size: ", len(database_f))
     # print(database_f)
-    if len(database_f) < 20:
+    if len(database_f) < 10:
         return -1, -1
 
     # draw_smile_curve(database_f, current_price, kk, 1)
@@ -572,16 +577,14 @@ def single_iv_estimation_svr(raw, iv, tm, kk, pp, plot=1, method="kr"):
         # svr = GridSearchCV(SVR(kernel='rbf'), cv=3,
         #                param_grid={
         #                             "C": [1e3, 1e4, 1e5],
-        #                             # "C": [1e10],
         #                            'epsilon':[0.001, 0.002, 0.003],
         #                            "gamma": [1e-6, 1e-5, 1e-4]
         #                            })
         svr = GridSearchCV(SVR(kernel='rbf'), cv=3,
                        param_grid={
-                                    "C": [1e3, 1e5],
-                                    # "C": [1e10],
-                                   'epsilon':[0.001],
-                                   "gamma": [1e-3, 1e-4, 1e-6]
+                                    "C": [1e4],
+                                   'epsilon':[0.0005],
+                                   "gamma": [1e-4, 1e-5, 1e-6]
                                    })
         # svr = GridSearchCV(SVR(kernel='poly', degree=2, gamma=1e5, epsilon=0.01, C=1e5), cv=3,
         #                    param_grid={
@@ -685,8 +688,10 @@ def mass_iv_assessment_svr(raw, iv, plot=0, specific=-1, method="kr"):
     perc_table = []
     diff_call_table = []
     diff_put_table = []
-    large_diff_table = []
+    large_diff_table = [["Index", "Percentage Error", "Type", "Estimated Option Price", "Actual Option Price"]]
     abnormal_table = []
+    perc_err_table = [["index", "Percentage Error"]]
+    cumm_perc_err_table = [["Index", "Cumulative Percentage Error"]]
     # print(len(iv), len(raw))
     for i in range(1, size):  ############ DEBUG ##########
         if specific != -1:
@@ -743,7 +748,10 @@ def mass_iv_assessment_svr(raw, iv, plot=0, specific=-1, method="kr"):
                 large_diff_table.append([i, diff/actual_price, option_type, est_put, actual_price])
 
         write_log("Perc diff is ", diff/actual_price)
-        print("Cumulative Avg Perc Diff =", sum(perc_table)/len(diff_table))
+        perc_err_table.append([i, diff/actual_price])
+        write_log("Cumulative Avg Perc Diff =", sum(perc_table)/len(diff_table))
+        cumm_perc_err_table.append([i, sum(perc_table)/len(diff_table)])
+
         #####DEBUG####
         # if i == 5000:
         #     print("DEBUG: break at i=5000")
@@ -765,12 +773,16 @@ def mass_iv_assessment_svr(raw, iv, plot=0, specific=-1, method="kr"):
     write_log(large_diff_table)
     write_report_into_file(large_diff_table, "large_diff_table.csv")
     write_log("\n\n\nAbnormal Table")
+    abnormal_table = list(map(lambda x: [x], abnormal_table))
     write_log(abnormal_table)
     write_report_into_file(abnormal_table, "abnormal_table.csv")
     write_log("Average absolute error is " + str(avg_abs_diff))
     write_log("Average percentage error is " + str(avg_perc_diff))
     write_log("Average (est_call_5 - actual_price) = ", avg_diff_call)
     write_log("Average (est_put_5 - actual_price) = ", avg_diff_put)
+
+    write_report_into_file(perc_err_table, "perc_error_table.csv")
+    write_report_into_file(cumm_perc_err_table, "cumm_perc_err_table.csv")
 
 def main():
     write_log("Start main function.")
@@ -877,7 +889,7 @@ def main():
     else:
         write_log("IV Preparation skipped")
 
-    # Formate of iv_table:
+    # Formate of iv_table: (Outdated)
         # iv_table[i][iv, hr, min, sec]
         # iv  = ivtable[i][0]
         # hr  = ivtable[i][1]
@@ -921,7 +933,7 @@ def main():
     if 0:
         DATE = raw_data[1][3]
         # x = input("Enter the row number for assessment: ")
-        x = 17712
+        x = 11090
         mass_iv_assessment_svr(raw_data, iv_list, plot=1, specific=int(x), method=METHOD)
     else:
         write_log("Specific IV assessment (SVR/KR) skipped")
