@@ -535,9 +535,11 @@ def single_iv_estimation_svr(raw, iv, tm, kk, pp, plot=1, method="kr"):
     timer_start = time.time()
 
     database_f = []
-    while len(database_f) < 10:
-        tm = tm - timedelta(minutes=5)
-        database_5 = build_database(raw, iv, tm, 5)
+    left_bound_ind = 0
+    right_bound_ind = 0
+    while len(database_f) < 20 or not left_bound_ind or not right_bound_ind:
+        tm = tm - timedelta(minutes=2)
+        database_5 = build_database(raw, iv, tm, 2)
         # print("datasbase_5")
         # print(database_5)
         if database_5[0][0] == -1:
@@ -553,22 +555,33 @@ def single_iv_estimation_svr(raw, iv, tm, kk, pp, plot=1, method="kr"):
         current_maturity = pp
         for row in database_5:
             abs_diff = abs(row[1] - current_maturity)/current_maturity
-            if abs_diff < 0.1 and row[5] >0:
+            if abs_diff < 0.2 and row[5] >0:
                 database_f.append(row)
+                if row[2] < kk:
+                    left_bound_ind = 1
+                elif row[2] > kk:
+                    right_bound_ind = 1
     write_log("database_f size: ", len(database_f))
     # print(database_f)
-    if len(database_f) < 10:
+    if len(database_f) < 20:
         return -1, -1
 
     # draw_smile_curve(database_f, current_price, kk, 1)
     # Fit a smile curve based on prepared database_f using SVR
     if method=="svr":
+        # svr = GridSearchCV(SVR(kernel='rbf'), cv=3,
+        #                param_grid={
+        #                             "C": [1e3, 1e4, 1e5],
+        #                             # "C": [1e10],
+        #                            'epsilon':[0.001, 0.002, 0.003],
+        #                            "gamma": [1e-6, 1e-5, 1e-4]
+        #                            })
         svr = GridSearchCV(SVR(kernel='rbf'), cv=3,
                        param_grid={
-                                    "C": [1e3, 1e4, 1e5],
+                                    "C": [1e3, 1e5],
                                     # "C": [1e10],
-                                   'epsilon':[0.001, 0.002, 0.003],
-                                   "gamma": [1e-6, 1e-5, 1e-4]
+                                   'epsilon':[0.001],
+                                   "gamma": [1e-3, 1e-4, 1e-6]
                                    })
         # svr = GridSearchCV(SVR(kernel='poly', degree=2, gamma=1e5, epsilon=0.01, C=1e5), cv=3,
         #                    param_grid={
@@ -908,7 +921,7 @@ def main():
     if 0:
         DATE = raw_data[1][3]
         # x = input("Enter the row number for assessment: ")
-        x = 20211
+        x = 17712
         mass_iv_assessment_svr(raw_data, iv_list, plot=1, specific=int(x), method=METHOD)
     else:
         write_log("Specific IV assessment (SVR/KR) skipped")
