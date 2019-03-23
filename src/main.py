@@ -407,69 +407,6 @@ def build_database(raw, iv, tm, interval=1):
     # if len(database)
     return database
 
-def func(x, a, b, c):
-    return a * (x - b) * (x - b) + c
-
-def inc_seq(min, max):
-    x = []
-    for i in range(min,max):
-        x.append(i)
-        x.append(i+0.5)
-    return x
-
-def draw_smile_curve(database, current_price, kk, plot=1):
-    size = len(database)
-    if size == 0:
-        write_log("Empty input database, Smile curve can't be drawn.")
-        return -1, -1, -1
-    x = np.zeros(size)
-    y = np.zeros(size)
-    a = [0, 0.2]
-    b = []
-    for i in a:
-        b.append(database[0][4])
-    for i in range(size):
-        y[i] = pow(database[i][5], 2)
-        # y[i] = database[i][5]
-        x[i] = database[i][2]
-
-
-
-    # Show distribution of data points
-    # print(x)
-    # plt.scatter(x, y, s=10)
-    # plt.plot(b, a)
-    # plt.xlabel('Strike Price (K)')
-    # plt.ylabel('Implied Volatility (σ^2)')
-    # time.sleep(20)
-
-    try:
-        # Use relevant data points to fit a curve
-        # x_std = inc_seq(int(current_price * 0.5), int(current_price * 1.5))
-        x_std = inc_seq(80, 240)
-        # popt = estimated [a, b, c]
-        popt1, pcov1 = curve_fit(func, x, y, bounds=([0, current_price - 0.02, 0], [np.inf, current_price + 0.02, np.inf]))
-        # popt2, pcov2 = curve_fit(func, x,`` y, bounds=([0, -np.inf, -np.inf], [np.inf, np.inf, np.inf]))
-        popt2, pcov2 = curve_fit(func, x, y, bounds=([0, -np.inf, 0], [np.inf, np.inf, np.inf]))
-    except:
-        write_log("Error (draw_smile_curve):", sys.exc_info()[0])
-        return -1, -1, -1
-    # print(x_std)
-    if plot:
-        plt.plot(x_std, func(x_std, *popt1), 'r--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt1))
-        plt.plot(x_std, func(x_std, *popt2), 'g--', label='fit: a=%5.10f, b=%5.3f, c=%5.3f' % tuple(popt2))
-        plt.scatter(x, y, s=10)
-
-        plt.legend()
-        plt.grid()
-        plt.show()
-        # plt.figure()    ### DEBUG ####
-        pass
-
-    # return popt1
-    return popt2
-
-
 # User input time, strike price and maturity
 def input_all(THRESHOLD=30):        ###TODO: Change to Datetime format ####
     # Read input
@@ -717,7 +654,7 @@ def mass_iv_assessment_svr(raw, iv, plot=0, specific=-1, method="kr"):
         # est_call, est_put = single_iv_estimation_svr(raw, iv, hh, mm, kk, pp, plot=plot, method=method)
         est_call, est_put = single_iv_estimation_svr(raw, iv, tm, kk, pp, plot=plot, method=method)
         if est_call == -1 and est_put == -1:
-            write_log("Not enought data to predict option price.")
+            write_log("Not enough data to predict option price.")
             abnormal_table.append(i)
             continue
         elif est_call == -2 and est_put == -2:
@@ -949,6 +886,7 @@ def main():
 
 
     write_log("Task done. Exiting main function...")
+    logg.close()
 
 if __name__ == "__main__":
     main()
